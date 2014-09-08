@@ -2,11 +2,11 @@ type loc = Lexing.position
 type dotted_name = string list
 
 type sym_kind =
-    | Undefined
     | Unit
     | Variable
     | Subprogram
     | Parameter
+    | Class_type
 
 type symbol = {
     sym_parent: symbol;
@@ -18,6 +18,7 @@ type symbol = {
     mutable sym_locals: symbol list;
     mutable sym_parameters: symbol list;
     mutable sym_param_mode: param_mode;
+    mutable sym_base_class: symbol option;
 }
 
 and param_mode = Const_param | Var_param | Out_param
@@ -28,5 +29,7 @@ and ttype =
 
 val new_root_symbol : unit -> symbol
 
-val find_or_create_sym : symbol -> loc -> string -> symbol
+val find_or_create_sym : symbol -> loc -> string -> sym_kind -> symbol
 val create_sym : symbol -> loc -> string -> sym_kind -> symbol
+val search_scope : symbol -> loc -> string -> sym_kind list -> string -> symbol
+val search_for_dotted_name : symbol -> loc -> dotted_name -> sym_kind list -> string -> symbol

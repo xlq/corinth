@@ -11,6 +11,7 @@ type unit_decl = loc * dotted_name * decl list
 and decl =
     | Var_decl of loc * string list * ttype
     | Sub_decl of loc * string * parameter list * ttype option
+    | Type_decl of loc * string * type_defn
 
 and parameter = loc * param_mode * string list * ttype
 
@@ -19,3 +20,8 @@ and param_mode = Const_param | Var_param | Out_param
 and ttype =
     | Integer (* This is temporary, for development. *)
     | Named_type of dotted_name
+
+and type_defn =
+    | Class_defn of loc
+                  * dotted_name option (* base class *)
+                  * decl list

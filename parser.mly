@@ -18,7 +18,7 @@
 %token <Big_int.big_int> INTEGER
 
 /* Keywords */
-%token END FUNCTION IS OUT PROCEDURE RECORD TYPE UNIT VAR
+%token CLASS END FUNCTION IS OUT PROCEDURE RECORD TYPE UNIT VAR
 
 %token LPAREN RPAREN LBRACKET RBRACKET COLON SEMICOLON DOT COMMA STAR
 %token ASSIGN DOTDOT EQ NE LT GT LE GE ARROW
@@ -52,6 +52,12 @@ decl:
     | ident_list COLON ttype SEMICOLON { Var_decl(loc(), $1, $3) }
     | PROCEDURE IDENT opt_parameters SEMICOLON { Sub_decl(loc(), $2, $3, None) }
     | FUNCTION IDENT opt_parameters COLON ttype SEMICOLON { Sub_decl(loc(), $2, $3, Some $5) }
+    | TYPE IDENT EQ type_defn SEMICOLON
+        { let ending, defn = $4 in
+          begin match ending with
+            | Some ending -> check_end (rhs_start_pos 2, $2) ending
+            | None -> ()
+          end; Type_decl(loc(), $2, defn) }
 
 opt_parameters:
     | /* empty */ { [] }
@@ -72,3 +78,11 @@ param_mode:
 ttype:
     | dotted_name
         { if List.map String.lowercase $1 = ["integer"] then Integer else Named_type $1 }
+
+type_defn:
+    | CLASS decls END IDENT
+        { (Some (rhs_start_pos 4, $4),
+           Class_defn(loc(), None, $2)) }
+    | CLASS LPAREN dotted_name RPAREN decls END IDENT
+        { (Some (rhs_start_pos 7, $7),
+           Class_defn(rhs_start_pos 3, Some $3, $5)) }

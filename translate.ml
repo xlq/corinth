@@ -17,7 +17,7 @@ let rec trans_unit ts (loc, name, decls) =
         | [name1] ->
             trans_decls {ts with ts_scope = create_sym ts.ts_scope loc name1 Unit} decls
         | name1::name ->
-            trans_unit {ts with ts_scope = find_or_create_sym ts.ts_scope loc name1}
+            trans_unit {ts with ts_scope = find_or_create_sym ts.ts_scope loc name1 Unit}
                 (loc, name, decls)
         | [] -> assert false
 
@@ -30,7 +30,7 @@ and trans_decl ts = function
             let new_sym = create_sym ts.ts_scope loc name Variable in
             new_sym.sym_type <- Some ttype'
         ) names
-    | Parse_tree.Sub_decl(loc, name, params, return_type) ->
+    | Parse_tree.Sub_decl(loc, name, params, return_type) -> begin
         let sub_sym = create_sym ts.ts_scope loc name Subprogram in
         List.iter (fun (loc, mode, names, ttype) ->
             let ttype' = trans_type {ts with ts_scope = sub_sym} ttype in
@@ -46,6 +46,14 @@ and trans_decl ts = function
         sub_sym.sym_type <- match return_type with
             | Some rt -> Some (trans_type {ts with ts_scope = sub_sym} rt)
             | None -> None
+    end
+    | Parse_tree.Type_decl(loc, name, Class_defn(loc2, base_class, decls)) ->
+        let base_class' = match base_class with
+            | Some base_class ->
+                Some (search_for_dotted_name ts.ts_scope loc2 base_class [Class_type] "base class")
+            | None -> None in
+        let type_sym = create_sym ts.ts_scope loc name Class_type in
+        type_sym.sym_base_class <- base_class';
 
 and trans_type ts = function
     | Parse_tree.Integer ->

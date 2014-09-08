@@ -8,6 +8,7 @@
         tbl
 
     let keywords = create_hashtable [
+        "class",            CLASS;
         "end",              END;
         "function",         FUNCTION;
         "is",               IS;
