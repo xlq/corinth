@@ -1,0 +1,50 @@
+{
+    open Parser
+    open Big_int
+
+    let create_hashtable init =
+        let tbl = Hashtbl.create (List.length init) in
+        List.iter (fun (key,data) -> Hashtbl.add tbl key data) init;
+        tbl
+
+    let keywords = create_hashtable [
+        "end",              END;
+        "function",         FUNCTION;
+        "is",               IS;
+        "out",              OUT;
+        "procedure",        PROCEDURE;
+        "record",           RECORD;
+        "type",             TYPE;
+        "unit",             UNIT;
+        "var",              VAR;
+    ]
+        
+}
+
+rule scan = parse
+    [' ' '\t']          { scan lexbuf }
+  | '\n'                { Lexing.new_line lexbuf; scan lexbuf }
+  | "--" [^ '\n']* '\n' { Lexing.new_line lexbuf; scan lexbuf }
+  | ['A'-'Z' 'a'-'z' '_'] ['A'-'Z' 'a'-'z' '0'-'9' '_']* as id
+        { try Hashtbl.find keywords id
+          with Not_found -> IDENT(id) }
+  | ['0'-'9']+ as value { INTEGER(big_int_of_string value) }
+  | '('  { LPAREN }
+  | ')'  { RPAREN }
+  | '['  { LBRACKET }
+  | ']'  { RBRACKET }
+  | ':'  { COLON }
+  | ';'  { SEMICOLON }
+  | '.'  { DOT }
+  | ','  { COMMA }
+  | '*'  { STAR }
+  | ":=" { ASSIGN }
+  | ".." { DOTDOT }
+  | '='  { EQ }
+  | "<>" { NE }
+  | '<'  { LT }
+  | '>'  { GT }
+  | "<=" { LE }
+  | ">=" { GE }
+  | "=>" { ARROW }
+  | eof  { EOF }
