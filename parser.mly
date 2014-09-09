@@ -41,15 +41,15 @@ ident_list:
     | IDENT COMMA ident_list { $1::$3 }
 
 unit_decl:
-    | UNIT dotted_name SEMICOLON decls
+    | UNIT dotted_name SEMICOLON normal_decls
         { (loc(), $2, $4) }
 
-decls:
+normal_decls:
     | /* empty */ { [] }
-    | decl decls { $1::$2 }
+    | decl normal_decls { $1::$2 }
+    | var normal_decls { $1::$2 }
 
 decl:
-    | ident_list COLON ttype SEMICOLON { Var_decl(loc(), $1, $3) }
     | PROCEDURE IDENT opt_parameters SEMICOLON { Sub_decl(loc(), $2, $3, None) }
     | FUNCTION IDENT opt_parameters COLON ttype SEMICOLON { Sub_decl(loc(), $2, $3, Some $5) }
     | TYPE IDENT EQ type_defn SEMICOLON
@@ -58,6 +58,17 @@ decl:
             | Some ending -> check_end (rhs_start_pos 2, $2) ending
             | None -> ()
           end; Type_decl(loc(), $2, defn) }
+
+var:
+    | VAR ident_list COLON ttype SEMICOLON { Var_decl(loc(), $2, $4) }
+
+field:
+    | ident_list COLON ttype SEMICOLON { Var_decl(loc(), $1, $3) }
+
+field_decls:
+    | /* empty */ { [] }
+    | decl field_decls { $1::$2 }
+    | field field_decls { $1::$2 }
 
 opt_parameters:
     | /* empty */ { [] }
@@ -80,9 +91,9 @@ ttype:
         { if List.map String.lowercase $1 = ["integer"] then Integer else Named_type(loc(), $1) }
 
 type_defn:
-    | CLASS decls END IDENT
+    | CLASS field_decls END IDENT
         { (Some (rhs_start_pos 4, $4),
            Class_defn(loc(), None, $2)) }
-    | CLASS LPAREN dotted_name RPAREN decls END IDENT
+    | CLASS LPAREN dotted_name RPAREN field_decls END IDENT
         { (Some (rhs_start_pos 7, $7),
            Class_defn(rhs_start_pos 3, Some $3, $5)) }
