@@ -18,5 +18,6 @@ let _ =
     let root_sym = Symtab.new_root_symbol () in
     let unit = try_parse Parser.unit_decl lexbuf in
     let ts = Translate.new_translation_state root_sym in
-    Translate.trans_unit ts unit
+    Translate.trans_unit ts unit;
+    Translate.finish_trans ts
 

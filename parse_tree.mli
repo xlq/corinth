@@ -1,5 +1,3 @@
-open Symtab
-
 type loc = Lexing.position
 type dotted_name = string list
 
@@ -19,7 +17,7 @@ and param_mode = Const_param | Var_param | Out_param
 
 and ttype =
     | Integer (* This is temporary, for development. *)
-    | Named_type of dotted_name
+    | Named_type of loc * dotted_name
 
 and type_defn =
     | Class_defn of loc

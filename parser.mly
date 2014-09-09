@@ -77,7 +77,7 @@ param_mode:
 
 ttype:
     | dotted_name
-        { if List.map String.lowercase $1 = ["integer"] then Integer else Named_type $1 }
+        { if List.map String.lowercase $1 = ["integer"] then Integer else Named_type(loc(), $1) }
 
 type_defn:
     | CLASS decls END IDENT

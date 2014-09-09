@@ -2,14 +2,19 @@
 
 open Symtab
 
+type todo =
+    | Todo_class_defn of Parse_tree.decl list * symbol
+
 type translation_state = {
     ts_root: symbol;
     ts_scope: symbol;
+    ts_todo: todo list ref;
 }
 
 let new_translation_state root = {
     ts_root = root;
     ts_scope = root;
+    ts_todo = ref [];
 }
 
 let rec trans_unit ts (loc, name, decls) =
@@ -47,14 +52,23 @@ and trans_decl ts = function
             | Some rt -> Some (trans_type {ts with ts_scope = sub_sym} rt)
             | None -> None
     end
-    | Parse_tree.Type_decl(loc, name, Class_defn(loc2, base_class, decls)) ->
+    | Parse_tree.Type_decl(loc, name, Parse_tree.Class_defn(loc2, base_class, decls)) ->
         let base_class' = match base_class with
             | Some base_class ->
                 Some (search_for_dotted_name ts.ts_scope loc2 base_class [Class_type] "base class")
             | None -> None in
         let type_sym = create_sym ts.ts_scope loc name Class_type in
         type_sym.sym_base_class <- base_class';
+        ts.ts_todo := Todo_class_defn(decls, type_sym) :: !(ts.ts_todo)
 
 and trans_type ts = function
     | Parse_tree.Integer ->
         Integer_type
+    | Parse_tree.Named_type(loc, name) ->
+        Named_type(search_for_dotted_name ts.ts_scope loc name [Class_type] "type")
+
+let finish_trans ts =
+    List.iter (function
+        | Todo_class_defn(decls, class_sym) ->
+            trans_decls {ts with ts_scope = class_sym} decls
+    ) !(ts.ts_todo)
