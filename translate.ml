@@ -1,6 +1,7 @@
 (* Read the parse tree and create symbols. *)
 
 open Symtab
+open Errors
 
 type todo =
     | Todo_class_defn of Parse_tree.decl list * symbol
@@ -109,8 +110,20 @@ and trans_expr ts = function
 
 and trans_lvalue ts e =
     let e' = trans_expr ts e in
-    (* XXX *)
-    e'
+    match e' with
+        | Name(loc, sym) -> begin
+            match sym.sym_kind, sym.sym_param_mode with
+                | Parameter, Const_param ->
+                    semantic_error loc
+                        ("Cannot assign to immutable parameter `" ^
+                         sym.sym_name ^ "'.");
+                    raise Compile_error
+                | Parameter, (Var_param | Out_param) -> e'
+          end
+        | Binop(loc, _, _, _) ->
+            semantic_error loc
+                ("Cannot assign to the result of a binary operation.");
+            raise Compile_error
 
 let finish_trans ts =
     List.iter (function

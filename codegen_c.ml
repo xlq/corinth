@@ -40,8 +40,12 @@ let rec trans_istmt s = function
 and trans_istmts s = List.iter (trans_istmt s)
 
 and trans_iexpr s = function
-    | Name(loc, sym) ->
-        c_name_of_var s sym
+    | Name(loc, sym) -> begin
+        match sym.sym_kind, sym.sym_param_mode with
+            | Parameter, (Var_param|Out_param) ->
+                "(*" ^ c_name_of_var s sym ^ ")"
+            | _ -> c_name_of_var s sym
+    end
     | Binop(loc, lhs, op, rhs) ->
         "(" ^ trans_iexpr s lhs ^ ") "
             ^ (match op with
@@ -58,8 +62,12 @@ let trans_sub s sub_sym =
         ^ " " ^ c_name_of_sub s sub_sym ^ "("
         ^ String.concat ", " (List.map (fun param ->
                 c_name_of_type s (unsome param.sym_type)
-                ^ " " ^ c_name_of_param s param
+                ^ " " ^ (match param.sym_param_mode with
+                    | Const_param -> ""
+                    | Var_param | Out_param -> "*")
+                ^ c_name_of_param s param
             ) (parameters sub_sym))
-        ^ ")\n");
+        ^ ")");
+    emit s "{";
     trans_istmts (indent s) (unsome sub_sym.sym_code);
     emit s "}"
