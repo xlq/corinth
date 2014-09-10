@@ -19,6 +19,7 @@ type symbol = {
     mutable sym_parameters: symbol list;
     mutable sym_param_mode: param_mode;
     mutable sym_base_class: symbol option;
+    mutable sym_code: istmt list option;
 }
 
 and param_mode = Const_param | Var_param | Out_param
@@ -26,6 +27,15 @@ and param_mode = Const_param | Var_param | Out_param
 and ttype =
     | Integer_type  (* This is temporary, for development *)
     | Named_type of symbol
+
+and istmt =
+    | Assignment of loc * iexpr * iexpr
+
+and iexpr =
+    | Name of loc * symbol
+    | Binop of loc * iexpr * binop * iexpr
+
+and binop = Add | Subtract | Multiply | Divide
 
 let dummy_loc = {
     Lexing.pos_fname = "<built-in>";
@@ -46,6 +56,7 @@ let new_root_symbol () =
         sym_parameters = [];
         sym_param_mode = Const_param;
         sym_base_class = None;
+        sym_code = None;
     } in sym
 
 let describe_symbol sym =
@@ -78,6 +89,7 @@ let find_or_create_sym parent loc name kind =
             sym_parameters = [];
             sym_param_mode = Const_param;
             sym_base_class = None;
+            sym_code = None;
         } in parent.sym_locals <- new_sym :: parent.sym_locals; new_sym
 
 let create_sym parent loc name kind =

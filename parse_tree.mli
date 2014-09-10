@@ -8,7 +8,7 @@ type unit_decl = loc * dotted_name * decl list
 
 and decl =
     | Var_decl of loc * string list * ttype
-    | Sub_decl of loc * string * parameter list * ttype option
+    | Sub_decl of loc * string * parameter list * ttype option * stmt list
     | Type_decl of loc * string * type_defn
 
 and parameter = loc * param_mode * string list * ttype
@@ -23,3 +23,12 @@ and type_defn =
     | Class_defn of loc
                   * dotted_name option (* base class *)
                   * decl list
+
+and stmt =
+    | Assignment of loc * expr * expr
+
+and expr =
+    | Name of loc * dotted_name
+    | Binop of loc * expr * binop * expr
+
+and binop = Add | Subtract | Multiply | Divide

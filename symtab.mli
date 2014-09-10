@@ -19,6 +19,7 @@ type symbol = {
     mutable sym_parameters: symbol list;
     mutable sym_param_mode: param_mode;
     mutable sym_base_class: symbol option;
+    mutable sym_code: istmt list option;
 }
 
 and param_mode = Const_param | Var_param | Out_param
@@ -26,6 +27,15 @@ and param_mode = Const_param | Var_param | Out_param
 and ttype =
     | Integer_type  (* This is temporary, for development *)
     | Named_type of symbol
+
+and istmt =
+    | Assignment of loc * iexpr * iexpr
+
+and iexpr =
+    | Name of loc * symbol
+    | Binop of loc * iexpr * binop * iexpr
+
+and binop = Add | Subtract | Multiply | Divide
 
 val new_root_symbol : unit -> symbol
 

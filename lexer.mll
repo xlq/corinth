@@ -12,6 +12,7 @@
         "end",              END;
         "function",         FUNCTION;
         "is",               IS;
+        "null",             NULL;
         "out",              OUT;
         "procedure",        PROCEDURE;
         "record",           RECORD;
@@ -38,7 +39,10 @@ rule scan = parse
   | ';'  { SEMICOLON }
   | '.'  { DOT }
   | ','  { COMMA }
+  | '+'  { PLUS }
+  | '-'  { DASH }
   | '*'  { STAR }
+  | '/'  { SLASH }
   | ":=" { ASSIGN }
   | ".." { DOTDOT }
   | '='  { EQ }

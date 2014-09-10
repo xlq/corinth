@@ -18,10 +18,10 @@
 %token <Big_int.big_int> INTEGER
 
 /* Keywords */
-%token CLASS END FUNCTION IS OUT PROCEDURE RECORD TYPE UNIT VAR
+%token CLASS END FUNCTION IS NULL OUT PROCEDURE RECORD TYPE UNIT VAR
 
 %token LPAREN RPAREN LBRACKET RBRACKET COLON SEMICOLON DOT COMMA STAR
-%token ASSIGN DOTDOT EQ NE LT GT LE GE ARROW
+%token ASSIGN DOTDOT EQ NE LT GT LE GE ARROW PLUS DASH SLASH
 
 %token EOF
 
@@ -50,8 +50,12 @@ normal_decls:
     | var normal_decls { $1::$2 }
 
 decl:
-    | PROCEDURE IDENT opt_parameters SEMICOLON { Sub_decl(loc(), $2, $3, None) }
-    | FUNCTION IDENT opt_parameters COLON ttype SEMICOLON { Sub_decl(loc(), $2, $3, Some $5) }
+    | PROCEDURE IDENT opt_parameters IS compound_stmt END IDENT SEMICOLON
+        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 7, $7);
+          Sub_decl(loc(), $2, $3, None, $5) }
+    | FUNCTION IDENT opt_parameters COLON ttype IS compound_stmt END IDENT SEMICOLON
+        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 9, $9);
+          Sub_decl(loc(), $2, $3, Some $5, $7) }
     | TYPE IDENT EQ type_defn SEMICOLON
         { let ending, defn = $4 in
           begin match ending with
@@ -97,3 +101,21 @@ type_defn:
     | CLASS LPAREN dotted_name RPAREN field_decls END IDENT
         { (Some (rhs_start_pos 7, $7),
            Class_defn(rhs_start_pos 3, Some $3, $5)) }
+
+compound_stmt:
+    | NULL SEMICOLON { [] }
+    | stmts { $1 }
+
+stmts:
+    | stmt { [$1] }
+    | stmt stmts { $1::$2 }
+
+stmt:
+    | expr ASSIGN expr SEMICOLON { Assignment(loc(), $1, $3) }
+
+expr:
+    | dotted_name { Name(loc(), $1) }
+    | expr PLUS expr { Binop(rhs_start_pos 2, $1, Add, $3) }
+    | expr DASH expr { Binop(rhs_start_pos 2, $1, Subtract, $3) }
+    | expr STAR expr { Binop(rhs_start_pos 2, $1, Multiply, $3) }
+    | expr SLASH expr { Binop(rhs_start_pos 2, $1, Divide, $3) }
