@@ -121,5 +121,9 @@ let finish_trans ts =
             trans_stmts {ts with
                 ts_scope = sub_sym;
                 ts_block = Some block} body;
-            sub_sym.sym_code <- Some !block
+            sub_sym.sym_code <- Some !block;
+
+            (* XXX: Don't do this here! *)
+            let c_state = Codegen_c.new_state () in
+            Codegen_c.trans_sub c_state sub_sym
     ) !(ts.ts_todo)

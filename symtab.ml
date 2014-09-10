@@ -15,8 +15,7 @@ type symbol = {
     sym_first_seen: loc;
     mutable sym_defined: loc option;
     mutable sym_type: ttype option;
-    mutable sym_locals: symbol list;
-    mutable sym_parameters: symbol list;
+    mutable sym_locals: symbol list; (* Order is important for parameters. *)
     mutable sym_param_mode: param_mode;
     mutable sym_base_class: symbol option;
     mutable sym_code: istmt list option;
@@ -53,7 +52,6 @@ let new_root_symbol () =
         sym_defined = None;
         sym_type = None;
         sym_locals = [];
-        sym_parameters = [];
         sym_param_mode = Const_param;
         sym_base_class = None;
         sym_code = None;
@@ -86,11 +84,10 @@ let find_or_create_sym parent loc name kind =
             sym_defined = None;
             sym_type = None;
             sym_locals = [];
-            sym_parameters = [];
             sym_param_mode = Const_param;
             sym_base_class = None;
             sym_code = None;
-        } in parent.sym_locals <- new_sym :: parent.sym_locals; new_sym
+        } in parent.sym_locals <- parent.sym_locals @ [new_sym]; new_sym
 
 let create_sym parent loc name kind =
     let sym = find_or_create_sym parent loc name kind in
@@ -151,3 +148,6 @@ let search_for_dotted_name scope loc dname kinds expected =
                             undefined loc name
                     end
             in traverse (search_scope scope loc first [Unit] "unit") parts
+
+let parameters sym =
+    List.find_all (fun s -> s.sym_kind = Parameter) sym.sym_locals

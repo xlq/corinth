@@ -16,7 +16,6 @@ type symbol = {
     mutable sym_defined: loc option;
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list;
-    mutable sym_parameters: symbol list;
     mutable sym_param_mode: param_mode;
     mutable sym_base_class: symbol option;
     mutable sym_code: istmt list option;
@@ -43,3 +42,4 @@ val find_or_create_sym : symbol -> loc -> string -> sym_kind -> symbol
 val create_sym : symbol -> loc -> string -> sym_kind -> symbol
 val search_scope : symbol -> loc -> string -> sym_kind list -> string -> symbol
 val search_for_dotted_name : symbol -> loc -> dotted_name -> sym_kind list -> string -> symbol
+val parameters : symbol -> symbol list
