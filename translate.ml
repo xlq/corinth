@@ -126,6 +126,7 @@ and trans_lvalue ts e =
             raise Compile_error
 
 let finish_trans ts =
+    let subs = ref [] in
     List.iter (function
         | Todo_class_defn(decls, class_sym) ->
             trans_decls {ts with ts_scope = class_sym} decls
@@ -136,7 +137,9 @@ let finish_trans ts =
                 ts_block = Some block} body;
             sub_sym.sym_code <- Some !block;
 
-            (* XXX: Don't do this here! *)
-            let c_state = Codegen_c.new_state () in
-            Codegen_c.trans_sub c_state sub_sym
-    ) !(ts.ts_todo)
+            subs := sub_sym :: !subs
+    ) !(ts.ts_todo);
+
+    (* XXX: Don't do this here! *)
+    let c_state = Codegen_c.new_state () in
+    List.iter (Codegen_c.trans_sub c_state) !subs

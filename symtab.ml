@@ -1,3 +1,5 @@
+open Misc
+
 type loc = Lexing.position
 type dotted_name = string list
 
@@ -19,6 +21,8 @@ type symbol = {
     mutable sym_param_mode: param_mode;
     mutable sym_base_class: symbol option;
     mutable sym_code: istmt list option;
+    mutable sym_selected: bool;
+    mutable sym_translated: bool;
 }
 
 and param_mode = Const_param | Var_param | Out_param
@@ -55,6 +59,8 @@ let new_root_symbol () =
         sym_param_mode = Const_param;
         sym_base_class = None;
         sym_code = None;
+        sym_selected = false;
+        sym_translated = false;
     } in sym
 
 let describe_symbol sym =
@@ -87,6 +93,8 @@ let find_or_create_sym parent loc name kind =
             sym_param_mode = Const_param;
             sym_base_class = None;
             sym_code = None;
+            sym_selected = false;
+            sym_translated = false;
         } in parent.sym_locals <- parent.sym_locals @ [new_sym]; new_sym
 
 let create_sym parent loc name kind =
@@ -151,3 +159,34 @@ let search_for_dotted_name scope loc dname kinds expected =
 
 let parameters sym =
     List.find_all (fun s -> s.sym_kind = Parameter) sym.sym_locals
+
+let find_needed_syms sym =
+    let result = ref [] in
+    let needed x =
+        x.sym_selected <- true;
+        result := x :: !result in
+    let rec search sym =
+        if sym.sym_selected then () else
+        match sym.sym_kind with
+            | Unit -> assert false
+            | Variable -> needed sym; search_type (unsome sym.sym_type)
+            | Parameter -> search_type (unsome sym.sym_type)
+            | Class_type -> needed sym; List.iter search sym.sym_locals
+            | Subprogram ->
+                needed sym;
+                (match sym.sym_type with None -> () | Some t -> search_type t);
+                List.iter search (parameters sym)
+    and search_type = function
+        | Integer_type -> ()
+        | Named_type(sym) -> search sym
+    and search_istmt = function
+        | Assignment(_, lhs, rhs) ->
+            search_iexpr lhs; search_iexpr rhs
+    and search_iexpr = function
+        | Name(_, sym) -> search sym
+        | Binop(_, lhs, _, rhs) -> search_iexpr lhs; search_iexpr rhs
+    in
+    search sym;
+    List.iter search_istmt (unsome sym.sym_code);
+    List.iter (fun sym -> sym.sym_selected <- false) !result;
+    !result

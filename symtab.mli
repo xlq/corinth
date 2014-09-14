@@ -19,6 +19,8 @@ type symbol = {
     mutable sym_param_mode: param_mode;
     mutable sym_base_class: symbol option;
     mutable sym_code: istmt list option;
+    mutable sym_selected: bool;
+    mutable sym_translated: bool;
 }
 
 and param_mode = Const_param | Var_param | Out_param
@@ -43,3 +45,6 @@ val create_sym : symbol -> loc -> string -> sym_kind -> symbol
 val search_scope : symbol -> loc -> string -> sym_kind list -> string -> symbol
 val search_for_dotted_name : symbol -> loc -> dotted_name -> sym_kind list -> string -> symbol
 val parameters : symbol -> symbol list
+
+(* Find all the symbols (types, functions, etc.) that the given symbol needs. *)
+val find_needed_syms : symbol -> symbol list
