@@ -14,10 +14,9 @@ type symbol = {
     sym_parent: symbol;
     mutable sym_kind: sym_kind;
     sym_name: string;
-    sym_first_seen: loc;
     mutable sym_defined: loc option;
     mutable sym_type: ttype option;
-    mutable sym_locals: symbol list; (* Order is important for parameters. *)
+    mutable sym_locals: symbol list;
     mutable sym_param_mode: param_mode;
     mutable sym_base_class: symbol option;
     mutable sym_code: istmt list option;
@@ -37,6 +36,7 @@ and istmt =
 and iexpr =
     | Name of loc * symbol
     | Binop of loc * iexpr * binop * iexpr
+    | Field_access of loc * iexpr * symbol
 
 and binop = Add | Subtract | Multiply | Divide
 
@@ -52,7 +52,6 @@ let new_root_symbol () =
         sym_parent = sym;
         sym_kind = Unit;
         sym_name = "";
-        sym_first_seen = dummy_loc;
         sym_defined = None;
         sym_type = None;
         sym_locals = [];
@@ -82,11 +81,11 @@ let undefined loc name =
 let find_or_create_sym parent loc name kind =
     try List.find (fun s -> s.sym_name = name) parent.sym_locals
     with Not_found ->
+        print_endline ("Creating sym " ^ name ^ " under " ^ parent.sym_name);
         let new_sym = {
             sym_parent = parent;
             sym_kind = kind;
             sym_name = name;
-            sym_first_seen = loc;
             sym_defined = None;
             sym_type = None;
             sym_locals = [];
@@ -123,6 +122,15 @@ let search_locals sym loc name kinds expected =
     with Not_found -> None end with
         | Some sym -> Some (check_sym_kind loc kinds expected sym)
         | None -> None
+
+let find_local sym loc name kinds expected =
+    if not sym.sym_translated then begin
+        Errors.internal_error loc ("`" ^ sym.sym_name ^ "' is not translated yet.");
+        raise Errors.Internal_error
+    end else match search_locals sym loc name kinds expected with
+        | Some sym -> sym
+        | None ->
+            undefined loc name
 
 let search_scope scope loc name kinds expected =
     let rec search scope =
@@ -185,6 +193,7 @@ let find_needed_syms sym =
     and search_iexpr = function
         | Name(_, sym) -> search sym
         | Binop(_, lhs, _, rhs) -> search_iexpr lhs; search_iexpr rhs
+        | Field_access(_, lhs, _) -> search_iexpr lhs
     in
     search sym;
     List.iter search_istmt (unsome sym.sym_code);

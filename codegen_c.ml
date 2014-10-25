@@ -64,6 +64,9 @@ and trans_iexpr s = function
                 | Multiply -> "*"
                 | Divide -> "/")
             ^ " (" ^ trans_iexpr s rhs ^ ")"
+    | Field_access(loc, lhs, field) -> begin
+        (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field
+    end
 
 let is_scalar = function
     | Integer_type -> true
