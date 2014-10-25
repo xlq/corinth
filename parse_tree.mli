@@ -25,10 +25,15 @@ and type_defn =
                   * decl list
 
 and stmt =
+    | Decl of decl
+    | Sub_call of expr (* expr must be Call(...) *)
     | Assignment of loc * expr * expr
 
 and expr =
     | Name of loc * dotted_name
     | Binop of loc * expr * binop * expr
+    | Call of loc * expr * expr_map
+
+and expr_map = expr list * (string * expr) list
 
 and binop = Add | Subtract | Multiply | Divide

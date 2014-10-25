@@ -19,7 +19,9 @@ type symbol = {
     mutable sym_base_class: symbol option;
     mutable sym_code: istmt list option;
     mutable sym_selected: bool;
-    mutable sym_translated: bool;
+    mutable sym_translated: bool; (* Body has been translated?
+        If false, some children may be missing. *)
+    mutable sym_backend_translated: bool;
 }
 
 and param_mode = Const_param | Var_param | Out_param

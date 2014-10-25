@@ -22,6 +22,7 @@ type symbol = {
     mutable sym_code: istmt list option;
     mutable sym_selected: bool;
     mutable sym_translated: bool;
+    mutable sym_backend_translated: bool;
 }
 
 and param_mode = Const_param | Var_param | Out_param
@@ -60,6 +61,7 @@ let new_root_symbol () =
         sym_code = None;
         sym_selected = false;
         sym_translated = false;
+        sym_backend_translated = false;
     } in sym
 
 let describe_symbol sym =
@@ -94,6 +96,7 @@ let find_or_create_sym parent loc name kind =
             sym_code = None;
             sym_selected = false;
             sym_translated = false;
+            sym_backend_translated = false;
         } in parent.sym_locals <- parent.sym_locals @ [new_sym]; new_sym
 
 let create_sym parent loc name kind =
@@ -125,8 +128,7 @@ let search_locals sym loc name kinds expected =
 
 let find_local sym loc name kinds expected =
     if not sym.sym_translated then begin
-        Errors.internal_error loc ("`" ^ sym.sym_name ^ "' is not translated yet.");
-        raise Errors.Internal_error
+        Errors.internal_error loc ("`" ^ sym.sym_name ^ "' is not translated yet.")
     end else match search_locals sym loc name kinds expected with
         | Some sym -> sym
         | None ->

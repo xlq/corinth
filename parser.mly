@@ -26,6 +26,8 @@
 %token EOF
 
 %nonassoc EQ NE LT LE GT GE
+%left PLUS DASH
+%left STAR SLASH
 
 %start unit_decl
 %type <Parse_tree.unit_decl> unit_decl
@@ -111,11 +113,39 @@ stmts:
     | stmt stmts { $1::$2 }
 
 stmt:
+    | var { Decl($1) }
+    | term SEMICOLON
+        { match $1 with Call _ -> Sub_call($1)
+                      | _ -> syntax_error (loc()) "Statement expected but expression found."; raise Parsing.Parse_error }
     | expr ASSIGN expr SEMICOLON { Assignment(loc(), $1, $3) }
 
-expr:
+term:
     | dotted_name { Name(loc(), $1) }
+    | term LPAREN expr_map RPAREN { Call(rhs_start_pos 2, $1, $3) }
+
+expr:
+    | term { $1 }
     | expr PLUS expr { Binop(rhs_start_pos 2, $1, Add, $3) }
     | expr DASH expr { Binop(rhs_start_pos 2, $1, Subtract, $3) }
     | expr STAR expr { Binop(rhs_start_pos 2, $1, Multiply, $3) }
     | expr SLASH expr { Binop(rhs_start_pos 2, $1, Divide, $3) }
+
+/* An expression list, which might have an associative part. */
+expr_map:
+    | ne_expr_list expr_assocs { ($1, $2) }
+    | ne_expr_assocs { ([], $1) }
+
+ne_expr_list:
+    | expr { [$1] }
+    | expr COMMA ne_expr_list { $1::$3 }
+
+expr_assocs:
+    | /* empty */ { [] }
+    | ne_expr_assocs { $1 }
+
+ne_expr_assocs:
+    | expr_assoc { [$1] }
+    | expr_assoc COMMA ne_expr_assocs { $1::$3 }
+
+expr_assoc:
+    IDENT ARROW expr { ($1, $3) }

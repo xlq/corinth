@@ -95,8 +95,8 @@ let func_prototype s sub_sym =
 let trans_sub s sub_sym =
     let prerequisites = find_needed_syms sub_sym in
     List.iter (fun sym ->
-        if not sym.sym_translated then begin
-            sym.sym_translated <- true;
+        if not sym.sym_backend_translated then begin
+            sym.sym_backend_translated <- true;
             match sym.sym_kind with
                 | Unit -> assert false;
                 | Variable ->
