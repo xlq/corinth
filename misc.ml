@@ -13,3 +13,8 @@ let rec times n s =
     match n with
         | 0 -> ""
         | n -> s ^ times (n-1) s
+
+let rec maybe_find f = function
+    | [] -> None
+    | x::l when f x -> Some x
+    | x::l -> maybe_find f l

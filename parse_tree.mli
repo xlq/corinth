@@ -1,39 +1,32 @@
 type loc = Lexing.position
 type dotted_name = string list
 
-type 'a associative =
+type 'a args =
     'a list * (string * 'a) list
 
-type unit_decl = loc * dotted_name * decl list
+type unit_decl =
+    | Unit of loc * dotted_name * decl list
 
 and decl =
-    | Var_decl of loc * string list * ttype
-    | Sub_decl of loc * string * parameter list * ttype option * stmt list
-    | Type_decl of loc * string * type_defn
-
-and parameter = loc * param_mode * string list * ttype
-
-and param_mode = Const_param | Var_param | Out_param
-
-and ttype =
-    | Integer (* This is temporary, for development. *)
-    | Named_type of loc * dotted_name
+    | Type_decl of loc * string * (loc * string) list * type_defn
+    | Proc_decl of loc * string * (loc * string) list * param list * ttype option * stmt list
 
 and type_defn =
-    | Class_defn of loc
-                  * dotted_name option (* base class *)
-                  * decl list
+    | Type_alias of ttype
+    | Record_type of (loc * string option * ttype) list
+
+and param = loc * string * ttype option * bool
+
+and ttype =
+    | Integer_type (* for development *)
+    | Named_type of loc * dotted_name
+    | Applied_type of loc * ttype * ttype args
+    | Pointer_type of ttype
 
 and stmt =
     | Decl of decl
-    | Sub_call of expr (* expr must be Call(...) *)
-    | Assignment of loc * expr * expr
+    | Expr of expr
 
 and expr =
     | Name of loc * dotted_name
-    | Binop of loc * expr * binop * expr
-    | Call of loc * expr * expr_map
-
-and expr_map = expr list * (string * expr) list
-
-and binop = Add | Subtract | Multiply | Divide
+    | Apply of loc * expr * expr args

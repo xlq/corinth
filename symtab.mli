@@ -3,20 +3,21 @@ type dotted_name = string list
 
 type sym_kind =
     | Unit
-    | Variable
-    | Subprogram
-    | Parameter
-    | Class_type
+    | Var (* variable or field *)
+    | Proc
+    | Type_sym
+    | Type_param
+    | Param
 
 type symbol = {
-    sym_parent: symbol;
-    mutable sym_kind: sym_kind;
+    sym_parent: symbol; (* Parent symbol (this symbol is in sym_parent.sym_locals). *)
+    sym_kind: sym_kind;
     sym_name: string;
-    mutable sym_defined: loc option; (* can be None for parent units that aren't loaded/defined *)
-    mutable sym_type: ttype option;
-    mutable sym_locals: symbol list; (* Order is important for parameters. *)
+    mutable sym_defined: loc option; (* Can be None for parent units that aren't loaded/defined. *)
+    mutable sym_type: ttype option; (* Type of variable/param, return type of function *)
+    mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
+    mutable sym_dispatching: bool; (* Parameter is dispatching (declared "disp") *)
     mutable sym_param_mode: param_mode;
-    mutable sym_base_class: symbol option;
     mutable sym_code: istmt list option;
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?
@@ -27,28 +28,27 @@ type symbol = {
 and param_mode = Const_param | Var_param | Out_param
 
 and ttype =
+    | No_type
     | Integer_type  (* This is temporary, for development *)
-    | Named_type of symbol
+    | Named_type of symbol * (symbol * ttype) list
+    | Pointer_type of ttype
+    | Record_type of symbol option
+    | Proc_type of symbol
 
 and istmt =
-    | Assignment of loc * iexpr * iexpr
+    | Call of loc * iexpr * (symbol * iexpr) list
 
 and iexpr =
     | Name of loc * symbol
-    | Binop of loc * iexpr * binop * iexpr
+    | Apply of loc * iexpr * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
 
-and binop = Add | Subtract | Multiply | Divide
-
-val new_root_symbol : unit -> symbol
-
-val describe_symbol : symbol -> string
-val find_or_create_sym : symbol -> loc -> string -> sym_kind -> symbol
+val new_root_sym : unit -> symbol
+val describe_sym : symbol -> string (* for error messages *)
 val create_sym : symbol -> loc -> string -> sym_kind -> symbol
-val find_local : symbol -> loc -> string -> sym_kind list -> string -> symbol
-val search_scope : symbol -> loc -> string -> sym_kind list -> string -> symbol
-val search_for_dotted_name : symbol -> loc -> dotted_name -> sym_kind list -> string -> symbol
-val parameters : symbol -> symbol list
-
-(* Find all the symbols (types, functions, etc.) that the given symbol needs. *)
-val find_needed_syms : symbol -> symbol list
+val get_type_params : symbol -> symbol list
+val get_fields : symbol -> symbol list (* get record fields, including from base type *)
+val get_params : symbol -> symbol list (* get proc parameters *)
+val string_of_type : ttype -> string
+val sym_is_grandchild : symbol -> symbol -> bool
+val full_name : symbol -> string

@@ -2,10 +2,12 @@
 
 open Symtab
 open Errors
+open Misc
+
+type ('a, 'b) alternative = Left of 'a | Right of 'b
 
 type todo =
-    | Todo_class_defn of Parse_tree.decl list * symbol
-    | Todo_sub_defn of Parse_tree.stmt list * symbol
+    | Todo_proc of Parse_tree.stmt list * symbol
 
 type translation_state = {
     ts_root: symbol;
@@ -29,18 +31,108 @@ let emit ts x =
         | None -> assert false
         | Some code -> code := (!code) @ [x] (* XXX: horribly inefficient *)
 
-let rec trans_unit ts (loc, name, decls) =
-    match name with
-        | [name1] ->
-            trans_decls {ts with ts_scope = create_sym ts.ts_scope loc name1 Unit} decls
-        | name1::name ->
-            trans_unit {ts with ts_scope = find_or_create_sym ts.ts_scope loc name1 Unit}
-                (loc, name, decls)
-        | [] -> assert false
+(* Return the name of the given symbol suitable for an error message. *)
+let name_for_error ts sym =
+    if sym_is_grandchild ts.ts_scope sym then sym.sym_name
+    else full_name sym
+
+let check_for_duplicate_definition scope loc name =
+    List.iter (fun sym ->
+        if sym.sym_name = name then begin
+            Errors.semantic_error loc
+                ("Redefinition of symbol `" ^ name ^ "'.");
+            Errors.semantic_error (unsome sym.sym_defined)
+                (String.capitalize (describe_sym sym)
+                 ^ " `" ^ name ^ "' was first defined here.");
+            raise Errors.Compile_error
+        end
+    ) scope.sym_locals
+
+(* Search current scope and parent scopes/etc. for the name. *)
+let rec search_scopes ts name =
+    match maybe_find (fun s -> s.sym_name = name) ts.ts_scope.sym_locals with
+        | Some sym -> Some sym
+        | None when ts.ts_scope.sym_parent == ts.ts_scope -> None
+        | None -> search_scopes {ts with ts_scope = ts.ts_scope.sym_parent} name
+
+let undefined_symbol ts loc name =
+    Errors.semantic_error loc ("`" ^ name ^ "' is undefined.");
+    raise Errors.Compile_error
+
+let search_scopes_or_fail ts loc name =
+    match search_scopes ts name with
+        | Some sym -> sym
+        | None -> undefined_symbol ts loc name
+
+(* Return the actual type (follow Named_type) *)
+let rec actual_type = function
+    | (Integer_type | Pointer_type _ | Record_type _) as t -> t
+    | Named_type({sym_kind=Type_sym; sym_type=Some t}, _) -> t
+
+let match_args_to_params loc what params pos_args named_args =
+    let remaining_params = ref params in
+    let matched_params = ref [] in
+    List.iter (fun pos_arg ->
+        match !remaining_params with
+            | param::params ->
+                remaining_params := params;
+                matched_params := (param, pos_arg) :: !matched_params
+            | [] ->
+                Errors.semantic_error loc ("Too many " ^ what ^ ".");
+                raise Errors.Compile_error
+    ) pos_args;
+    List.iter (fun (name, arg) ->
+        let rec search = function
+            | param::params when name = param.sym_name ->
+                matched_params := (param, arg) :: !matched_params;
+                params
+            | param::params ->
+                param :: search params
+            | [] ->
+                match maybe_find (fun (param, arg) ->
+                    name = param.sym_name)
+                !matched_params with
+                    | Some (param, arg) ->
+                        Errors.semantic_error loc
+                            ("Parameter `" ^ name ^ "' given twice.");
+                        raise Errors.Compile_error
+                    | None ->
+                        Errors.semantic_error loc
+                            ("No such parameter `" ^ name ^ "'.");
+                        raise Errors.Compile_error
+        in remaining_params := search !remaining_params
+    ) named_args;
+    List.iter (fun remaining_param ->
+        Errors.semantic_error loc
+            ("Missing parameter `" ^ remaining_param.sym_name ^ "'.")
+    ) !remaining_params;
+    !matched_params
+
+let rec loc_of_expr = function
+    | Parse_tree.Name(loc, _) -> loc
+    | Parse_tree.Apply(loc, _, _) -> loc
+
+let rec trans_unit ts = function
+    | Parse_tree.Unit(loc, [name], decls) ->
+        check_for_duplicate_definition ts.ts_scope loc name;
+        let new_unit = create_sym ts.ts_scope loc name Unit in
+        trans_decls {ts with ts_scope = new_unit} decls
+    | Parse_tree.Unit(loc, name1::name, decls) ->
+        trans_unit {ts with ts_scope =
+            match maybe_find (fun s -> s.sym_name = name1) ts.ts_scope.sym_locals with
+                | Some existing_unit -> existing_unit
+                | None ->
+                    (* Parent unit is not yet translated or defined. *)
+                    let new_unit = create_sym ts.ts_scope loc name1 Unit in
+                    new_unit.sym_defined <- None; (* not actually defined here *)
+                    new_unit
+            } (Parse_tree.Unit(loc, name, decls))
+    | Parse_tree.Unit(_, [], _) -> assert false
 
 and trans_decls ts = List.iter (trans_decl ts)
 
 and trans_decl ts = function
+    (*
     (* Variable definition *)
     | Parse_tree.Var_decl(loc, names, ttype) ->
         let ttype' = trans_type ts ttype in
@@ -48,98 +140,177 @@ and trans_decl ts = function
             let new_sym = create_sym ts.ts_scope loc name Variable in
             new_sym.sym_type <- Some ttype'
         ) names
-    (* Subprogram definition *)
-    | Parse_tree.Sub_decl(loc, name, params, return_type, body) -> begin
-        let sub_sym = create_sym ts.ts_scope loc name Subprogram in
-        List.iter (fun (loc, mode, names, ttype) ->
-            let ttype' = trans_type {ts with ts_scope = sub_sym} ttype in
-            List.iter (fun name ->
-                let param_sym = create_sym sub_sym loc name Parameter in
-                param_sym.sym_type <- Some ttype';
-                param_sym.sym_param_mode <- match mode with
-                    | Parse_tree.Const_param -> Const_param
-                    | Parse_tree.Var_param -> Var_param
-                    | Parse_tree.Out_param -> Out_param
-            ) names
+    *)
+    (* Procedure definition *)
+    | Parse_tree.Proc_decl(loc, name, type_params, params, return_type, body) -> begin
+        let proc_sym = create_sym ts.ts_scope loc name Proc in
+        trans_type_params {ts with ts_scope = proc_sym} type_params;
+        List.iter (fun (loc, name, ttype, disp) ->
+            let ttype' = match ttype with
+                | None -> None
+                | Some t -> Some (trans_type {ts with ts_scope = proc_sym} t) in
+            check_for_duplicate_definition proc_sym loc name;
+            let param_sym = create_sym proc_sym loc name Param in
+            param_sym.sym_type <- ttype';
+            param_sym.sym_param_mode <- Const_param (* TODO *)
         ) params;
-        sub_sym.sym_type <- (match return_type with
-            | Some rt -> Some (trans_type {ts with ts_scope = sub_sym} rt)
-            | None -> None);
-        todo ts (Todo_sub_defn(body, sub_sym))
+        proc_sym.sym_type <- (match return_type with
+            | Some rt -> Some (trans_type {ts with ts_scope = proc_sym} rt)
+            | None -> Some No_type);
+        todo ts (Todo_proc(body, proc_sym))
     end
-    (* Class declaration *)
-    | Parse_tree.Type_decl(loc, name, Parse_tree.Class_defn(loc2, base_class, decls)) ->
-        let base_class' = match base_class with
-            | Some base_class ->
-                Some (search_for_dotted_name ts.ts_scope loc2 base_class [Class_type] "base class")
-            | None -> None in
-        let type_sym = create_sym ts.ts_scope loc name Class_type in
-        type_sym.sym_base_class <- base_class';
-        todo ts (Todo_class_defn(decls, type_sym))
+    (* Record type declaration *)
+    | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Record_type(fields)) ->
+        let type_sym = create_sym ts.ts_scope loc name Type_sym in
+        trans_type_params {ts with ts_scope = type_sym} type_params;
+        type_sym.sym_type <- Some (Record_type(None)); (* TODO: base record *)
+        List.iter (fun (loc, name, ttype) ->
+            match name with
+                | Some name ->
+                    check_for_duplicate_definition type_sym loc name;
+                    ignore (create_sym type_sym loc name Var)
+                | None ->
+                    ignore (create_sym type_sym loc "" Var)
+        ) fields
+
+and trans_type_params ts type_params =
+    List.iter (fun (loc, name) ->
+        check_for_duplicate_definition ts.ts_scope loc name;
+        ignore (create_sym ts.ts_scope loc name Type_param)
+    ) type_params
 
 and trans_type ts = function
-    | Parse_tree.Integer ->
+    | Parse_tree.Integer_type ->
         Integer_type
-    | Parse_tree.Named_type(loc, name) ->
-        Named_type(search_for_dotted_name ts.ts_scope loc name [Class_type] "type")
+    | Parse_tree.Named_type(loc, [name]) ->
+        begin match search_scopes_or_fail ts loc name with
+            | {sym_kind=Type_sym} as typ ->
+                Named_type(typ, [])
+            | bad_sym ->
+                Errors.semantic_error loc
+                    ("Type expected but " ^ describe_sym bad_sym
+                     ^ " `" ^ name_for_error ts bad_sym ^ "' found.");
+                raise Errors.Compile_error
+        end
+    | Parse_tree.Applied_type(loc, ttype, (pos_args, named_args)) ->
+        begin match trans_type ts ttype with
+            | Named_type(type_sym, []) ->
+                begin match get_type_params type_sym with
+                    | [] ->
+                        Errors.semantic_error loc
+                            ("Type `" ^ name_for_error ts type_sym ^ "' has no parameters.");
+                        raise Errors.Compile_error
+                    | type_params ->
+                        let matched_args = match_args_to_params loc "type arguments"
+                            type_params pos_args named_args in
+                        Named_type(type_sym,
+                            List.map (fun (param, arg) ->
+                                (param, trans_type ts arg)) matched_args)
+                end
+            | Named_type(type_sym, _) as ttype ->
+                Errors.semantic_error loc
+                    ("Type " ^ string_of_type ttype ^ " already has arguments.");
+                raise Errors.Compile_error
+            | ttype ->
+                Errors.semantic_error loc
+                    ("Type " ^ string_of_type ttype ^ " cannot take arguments.");
+                raise Errors.Compile_error
+        end
+    | Parse_tree.Pointer_type(ttype) ->
+        Pointer_type(trans_type ts ttype)
 
 and trans_stmts ts = List.iter (trans_stmt ts)
 
 and trans_stmt ts = function
-    | Parse_tree.Assignment(loc, lhs, rhs) ->
+    (*| Parse_tree.Assignment(loc, lhs, rhs) ->
         let rhs' = trans_expr ts rhs in
         let lhs' = trans_lvalue ts lhs in
         (* XXX: Type-checking! *)
-        emit ts (Assignment(loc, lhs', rhs'))
+        emit ts (Assignment(loc, lhs', rhs'))*)
+    | Parse_tree.Decl decl -> trans_decl ts decl
+    | Parse_tree.Expr((Parse_tree.Apply _) as e) ->
+        let call, tcall = trans_expr ts e in
+        begin match call, tcall with
+            | Apply(loc, proc, args), No_type ->
+                emit ts (Call(loc, proc, args))
+            | Apply(loc, Name(_,({sym_kind=Proc} as proc_sym)), _), _ ->
+                Errors.semantic_error loc
+                    ("Proc `" ^ name_for_error ts proc_sym
+                        ^ "' returns a value, so cannot be called as a statement.")
+        end
+    | Parse_tree.Expr(e) ->
+        Errors.semantic_error
+            (loc_of_expr e)
+            "Statement expected but expression found."
 
 and trans_expr ts = function
     | Parse_tree.Name(loc, name) ->
-        let head::tail = name in
-        let sym = ref (search_scope ts.ts_scope loc head [Unit; Variable; Parameter] "expression") in
-        let expr = ref None in
-
-        List.iter (fun name ->
-            match !sym with
-                | {sym_kind = Unit} ->
-                    sym := find_local !sym loc name [Variable; Parameter; Subprogram] "expression"
-                | {sym_kind = Variable | Parameter;
-                   sym_type = Some(Named_type({sym_kind=Class_type} as cls))}
-                -> begin
-                    let field = find_local cls loc name [Variable; Subprogram] "field, method or property" in
-                    match field.sym_kind with
-                        | Variable ->
-                            expr := Some(Field_access(loc,
-                                (match !expr with
-                                    | None -> Name(loc, !sym) 
-                                    | Some e -> e), field));
-                            sym := field
+        let trans_sym sym =
+            match sym.sym_kind with
+                | Unit -> Left(sym)
+                | Var|Param ->
+                    Right(Name(loc, sym), unsome sym.sym_type)
+                | Proc ->
+                    Right (Name(loc, sym), Proc_type (sym))
+        in
+        let rec trans_dotted_name = function
+            | [base] -> trans_sym (search_scopes_or_fail ts loc base)
+            | part::rest ->
+                begin match trans_dotted_name rest with
+                    | Left(unit_sym) ->
+                        (* Look symbol up in unit. *)
+                        begin match maybe_find (fun s -> s.sym_name = part) (unit_sym.sym_locals) with
+                            | Some sym -> trans_sym sym
+                            | None ->
+                                Errors.semantic_error loc
+                                    ("Unit `" ^ name_for_error ts unit_sym ^ "' has no symbol named `"
+                                        ^ part ^ "'."); raise Errors.Compile_error
+                        end
+                    | Right(expr, tp) ->
+                        (* Look field up in record type. *)
+                        begin match tp with
+                            | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, _) ->
+                                begin match maybe_find (fun s -> s.sym_name = part) (get_fields type_sym) with
+                                    | Some field ->
+                                        Right(Field_access(loc, expr, field), unsome field.sym_type)
+                                    | None ->
+                                        Errors.semantic_error loc
+                                            ("Type `" ^ name_for_error ts type_sym ^ "' has no field named `" ^ part ^ "'.");
+                                        raise Errors.Compile_error
+                                end
+                            | wrong_type ->
+                                Errors.semantic_error loc
+                                    ("Type `" ^ string_of_type tp ^ "' has no fields.");
+                                raise Errors.Compile_error
+                        end
                 end
-        ) tail;
-        begin match !sym.sym_kind with
-            | Variable | Parameter -> ()
-            | Unit | Subprogram | Class_type ->
+        in begin match trans_dotted_name (List.rev name) with
+            | Left(unit_sym) ->
                 Errors.semantic_error loc
-                    ("Expression expected but "
-                        ^ describe_symbol !sym ^ " `"
-                        ^ !sym.sym_name ^ "' found.");
+                    ("Expression expected but unit `" ^ name_for_error ts unit_sym ^ "' found.");
                 raise Errors.Compile_error
-        end;
-        begin match !expr with
-            | None -> Name(loc, !sym)
-            | Some e -> e
+            | Right(expr, tp) -> (expr, tp)
+        end
+    | Parse_tree.Apply(loc, proc, (pos_args, named_args)) ->
+        let proc, proc_type = trans_expr ts proc in
+        begin match proc_type with
+            | Proc_type(proc_sym) ->
+                (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
+                let matched_args =
+                    List.map (fun (param, arg) ->
+                        let arg, arg_type = trans_expr ts arg in
+                        (* TODO: Type checking. *)
+                        (param, arg)
+                    ) (match_args_to_params loc "arguments"
+                        (get_params proc_sym) pos_args named_args) in
+                (* TODO: Bind type variables in return type. *)
+                (Apply(loc, proc, matched_args),
+                 unsome proc_sym.sym_type)
         end
 
-    | Parse_tree.Binop(loc, lhs, op, rhs) ->
-        let lhs' = trans_expr ts lhs in
-        let rhs' = trans_expr ts rhs in
-        (* XXX: Type-checking! *)
-        Binop(loc, lhs',
-            (match op with
-                | Parse_tree.Add -> Add
-                | Parse_tree.Subtract -> Subtract
-                | Parse_tree.Multiply -> Multiply
-                | Parse_tree.Divide -> Divide)
-            , rhs')
+
+(*
+
 
 and check_lvalue ts = function
     | Name(loc, sym) -> begin
@@ -162,28 +333,20 @@ and check_lvalue ts = function
 and trans_lvalue ts e =
     let e' = trans_expr ts e in
     check_lvalue ts e'; e'
+*)
 
 let finish_trans ts =
     let subs = ref [] in
     List.iter (function
-        | Todo_class_defn(decls, class_sym) ->
-            (* Class definition *)
-            trans_decls {ts with ts_scope = class_sym} decls;
-            class_sym.sym_translated <- true
-        | Todo_sub_defn _ -> ()
-    ) !(ts.ts_todo);
-    List.iter (function
-        | Todo_class_defn _ -> ()
-        | Todo_sub_defn(body, sub_sym) ->
-            let block = ref [] in
-            trans_stmts {ts with
-                ts_scope = sub_sym;
-                ts_block = Some block} body;
-            sub_sym.sym_code <- Some !block;
-            subs := sub_sym :: !subs;
-            sub_sym.sym_translated <- true
-    ) !(ts.ts_todo);
+        | Todo_proc(stmts, proc_sym) ->
+            let stmts' = ref [] in
+            trans_stmts {ts with ts_scope = proc_sym;
+                                 ts_block = Some stmts'} stmts;
+            proc_sym.sym_code <- Some !stmts';
+            subs := proc_sym :: !subs;
+            proc_sym.sym_translated <- true
+    ) !(ts.ts_todo)
 
     (* XXX: Don't do this here! *)
-    let c_state = Codegen_c.new_state () in
-    List.iter (Codegen_c.trans_sub c_state) !subs
+    (*let c_state = Codegen_c.new_state () in
+    List.iter (Codegen_c.trans_sub c_state) !subs*)

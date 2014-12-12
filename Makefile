@@ -1,7 +1,7 @@
 .PHONY: all clean
 
 all:
-	ocamlbuild corinth.d.byte -libs nums
+	ocamlbuild -cflags -w,-8 corinth.d.byte -libs nums
 
 clean:
 	ocamlbuild -clean corinth.d.byte

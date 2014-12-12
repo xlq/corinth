@@ -18,19 +18,19 @@
 %token <Big_int.big_int> INTEGER
 
 /* Keywords */
-%token CLASS END FUNCTION IS NULL OUT PROCEDURE RECORD TYPE UNIT VAR
+%token ABSTRACT DISP END IS OVERRIDE PROC TYPE UNIT VAR WITH
 
-%token LPAREN RPAREN LBRACKET RBRACKET COLON SEMICOLON DOT COMMA STAR
-%token ASSIGN DOTDOT EQ NE LT GT LE GE ARROW PLUS DASH SLASH
+
+%token LPAREN RPAREN LBRACE RBRACE QUESTION COLON SEMICOLON DOT COMMA STAR
+%token ASSIGN DOTDOT EQ NE LT GT LE GE ARROW PLUS DASH SLASH CARET
 
 %token EOF
 
-%nonassoc EQ NE LT LE GT GE
-%left PLUS DASH
-%left STAR SLASH
-
 %start unit_decl
 %type <Parse_tree.unit_decl> unit_decl
+
+%right CARET
+%left LT GT LE GE 
 
 %%
 
@@ -38,114 +38,91 @@ dotted_name:
     | IDENT { [$1] }
     | IDENT DOT dotted_name { $1 :: $3 }
 
-ident_list:
-    | IDENT { [$1] }
-    | IDENT COMMA ident_list { $1::$3 }
-
-unit_decl:
-    | UNIT dotted_name SEMICOLON normal_decls
-        { (loc(), $2, $4) }
-
-normal_decls:
-    | /* empty */ { [] }
-    | decl normal_decls { $1::$2 }
-    | var normal_decls { $1::$2 }
-
-decl:
-    | PROCEDURE IDENT opt_parameters IS compound_stmt END IDENT SEMICOLON
-        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 7, $7);
-          Sub_decl(loc(), $2, $3, None, $5) }
-    | FUNCTION IDENT opt_parameters COLON ttype IS compound_stmt END IDENT SEMICOLON
-        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 9, $9);
-          Sub_decl(loc(), $2, $3, Some $5, $7) }
-    | TYPE IDENT EQ type_defn SEMICOLON
-        { let ending, defn = $4 in
-          begin match ending with
-            | Some ending -> check_end (rhs_start_pos 2, $2) ending
-            | None -> ()
-          end; Type_decl(loc(), $2, defn) }
-
-var:
-    | VAR ident_list COLON ttype SEMICOLON { Var_decl(loc(), $2, $4) }
-
-field:
-    | ident_list COLON ttype SEMICOLON { Var_decl(loc(), $1, $3) }
-
-field_decls:
-    | /* empty */ { [] }
-    | decl field_decls { $1::$2 }
-    | field field_decls { $1::$2 }
-
-opt_parameters:
-    | /* empty */ { [] }
-    | LPAREN parameters RPAREN { $2 }
-
-parameters:
-    | parameter { [$1] }
-    | parameter SEMICOLON parameters { $1::$3 }
-
-parameter:
-    | param_mode ident_list COLON ttype { (loc(), $1, $2, $4) }
-
-param_mode:
-    | /* empty */ { Const_param }
-    | VAR         { Var_param }
-    | OUT         { Out_param }
-
 ttype:
-    | dotted_name
-        { if List.map String.lowercase $1 = ["integer"] then Integer else Named_type(loc(), $1) }
+    | dotted_name { if $1 = ["int"] then Integer_type else Named_type(loc(), $1) }
+    | ttype LT type_args GT { Applied_type(loc(), $1, $3) }
+    | CARET ttype { Pointer_type($2) }
+
+type_args:
+    | ttype { ([$1], []) }
+    | ttype COMMA type_args { let a,b = $3 in ($1::a,b) }
+    | type_assocs { ([], $1) }
+type_assocs:
+    | type_assoc { [$1] }
+    | type_assoc COMMA type_assocs { $1::$3 }
+type_assoc:
+    | IDENT ARROW ttype { ($1, $3) }
 
 type_defn:
-    | CLASS field_decls END IDENT
-        { (Some (rhs_start_pos 4, $4),
-           Class_defn(loc(), None, $2)) }
-    | CLASS LPAREN dotted_name RPAREN field_decls END IDENT
-        { (Some (rhs_start_pos 7, $7),
-           Class_defn(rhs_start_pos 3, Some $3, $5)) }
+    | ttype { Type_alias($1) }
+    | record_type { Record_type($1) }
+record_type:
+    | LBRACE record_fields RBRACE { $2 }
+record_fields:
+    | /* empty */ { [] }
+    | record_field { [$1] }
+    | record_field COMMA record_fields { $1::$3 }
+record_field:
+    | IDENT COLON ttype { (loc(), Some $1, $3) }
+    | ttype { (loc(), None, $1) }
 
-compound_stmt:
-    | NULL SEMICOLON { [] }
-    | stmts { $1 }
+decls:
+    | /* empty */ { [] }
+    | decl decls { $1::$2 }
+decl:
+    | TYPE IDENT opt_type_params EQ type_defn SEMICOLON
+        { Type_decl(loc(), $2, $3, $5) }
+    | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS proc_body END IDENT SEMICOLON
+        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 11, $11);
+          Proc_decl(loc(), $2, $3, $5, $7, $9) }
 
-stmts:
-    | stmt { [$1] }
-    | stmt stmts { $1::$2 }
+opt_type_params:
+    | /* empty */ { [] }
+    | LT type_params GT { $2 }
+type_params:
+    | /* empty */ { [] }
+    | type_param { [$1] }
+    | type_param COMMA type_params { $1::$3 }
+type_param:
+    | IDENT { (loc(), $1) }
 
+params:
+    | /* empty */ { [] }
+    | param { [$1] }
+    | param COMMA params { $1::$3 }
+param:
+    | opt_disp IDENT opt_type { (loc(), $2, $3, $1) }
+opt_disp:
+    | /* empty */ { false }
+    | DISP { true }
+opt_type:
+    | /* empty */ { None }
+    | COLON ttype { Some $2 }
+
+proc_body:
+    | /* empty */ { [] }
+    | decl_or_stmt proc_body { $1::$2 }
+
+decl_or_stmt:
+    | decl { Decl $1 }
+    | stmt { $1 }
 stmt:
-    | var { Decl($1) }
-    | term SEMICOLON
-        { match $1 with Call _ -> Sub_call($1)
-                      | _ -> syntax_error (loc()) "Statement expected but expression found."; raise Parsing.Parse_error }
-    | expr ASSIGN expr SEMICOLON { Assignment(loc(), $1, $3) }
-
-term:
-    | dotted_name { Name(loc(), $1) }
-    | term LPAREN expr_map RPAREN { Call(rhs_start_pos 2, $1, $3) }
+    | expr SEMICOLON { Expr $1 }
 
 expr:
-    | term { $1 }
-    | expr PLUS expr { Binop(rhs_start_pos 2, $1, Add, $3) }
-    | expr DASH expr { Binop(rhs_start_pos 2, $1, Subtract, $3) }
-    | expr STAR expr { Binop(rhs_start_pos 2, $1, Multiply, $3) }
-    | expr SLASH expr { Binop(rhs_start_pos 2, $1, Divide, $3) }
+    | LPAREN expr RPAREN { $2 }
+    | dotted_name { Name(loc(), $1) }
+    | expr LPAREN expr_map RPAREN { Apply(loc(), $1, $3) }
 
-/* An expression list, which might have an associative part. */
 expr_map:
-    | ne_expr_list expr_assocs { ($1, $2) }
-    | ne_expr_assocs { ([], $1) }
-
-ne_expr_list:
-    | expr { [$1] }
-    | expr COMMA ne_expr_list { $1::$3 }
-
+    | expr { ([$1], []) }
+    | expr COMMA expr_map { let a,b = $3 in ($1::a,b) }
+    | expr_assocs { ([], $1) }
 expr_assocs:
-    | /* empty */ { [] }
-    | ne_expr_assocs { $1 }
-
-ne_expr_assocs:
     | expr_assoc { [$1] }
-    | expr_assoc COMMA ne_expr_assocs { $1::$3 }
-
+    | expr_assoc COMMA expr_assocs { $1::$3 }
 expr_assoc:
-    IDENT ARROW expr { ($1, $3) }
+    | IDENT ARROW expr { ($1, $3) }
+
+unit_decl:
+    | UNIT dotted_name SEMICOLON decls { Unit(loc(), $2, $4) }

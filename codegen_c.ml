@@ -29,20 +29,20 @@ let c_name_of_sym s sym =
     c_name_of_dotted_name s (dotted_name_of_sym sym)
 
 let c_name_of_type_sym s sym =
-    match sym.sym_kind with
-        | Unit | Variable | Subprogram | Parameter -> assert false
-        | Class_type -> "struct " ^ c_name_of_sym s sym
+    match sym with
+        | {sym_kind=Type_sym; sym_type=Some (Record_type _)} ->
+            "struct " ^ c_name_of_sym s sym
 
 let c_name_of_type s = function
     | Integer_type -> "int"
-    | Named_type(tp) -> c_name_of_type_sym s tp
+    | Named_type tp -> c_name_of_type_sym s tp
 
 let c_name_of_var s sym =
     match sym.sym_kind with
-        | Unit | Subprogram | Class_type -> assert false
-        | Parameter -> c_name_of_local s sym
-        | Variable -> c_name_of_sym s sym
+        | Var -> c_name_of_sym s sym
+        | Param -> c_name_of_local s sym
 
+(*
 let rec trans_istmt s = function
     | Assignment(loc, lhs, rhs) ->
         emit s ("(" ^ trans_iexpr s lhs ^ ") = (" ^ trans_iexpr s rhs ^ ");")
@@ -53,7 +53,7 @@ and trans_iexpr s = function
     | Name(loc, sym) -> begin
         match sym.sym_kind, sym.sym_param_mode with
             | Parameter, (Var_param|Out_param) ->
-                "(*" ^ c_name_of_var s sym ^ ")"
+                "( *" ^ c_name_of_var s sym ^ ")"
             | _ -> c_name_of_var s sym
     end
     | Binop(loc, lhs, op, rhs) ->
@@ -79,8 +79,9 @@ let is_param_by_value param_sym =
     match param_sym.sym_param_mode with
         | Var_param | Out_param -> false
         | Const_param -> is_scalar (unsome param_sym.sym_type)
+*)
 
-let func_prototype s sub_sym =
+let func_prototype s proc_sym =
     (match sub_sym.sym_type with
         | None -> "void"
         | Some t -> c_name_of_type s t)

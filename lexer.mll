@@ -8,17 +8,16 @@
         tbl
 
     let keywords = create_hashtable [
-        "class",            CLASS;
-        "end",              END;
-        "function",         FUNCTION;
-        "is",               IS;
-        "null",             NULL;
-        "out",              OUT;
-        "procedure",        PROCEDURE;
-        "record",           RECORD;
-        "type",             TYPE;
-        "unit",             UNIT;
-        "var",              VAR;
+        "abstract",      ABSTRACT;
+        "disp",          DISP;
+        "end",           END;
+        "is",            IS;
+        "override",      OVERRIDE;
+        "proc",          PROC;
+        "type",          TYPE;
+        "unit",          UNIT;
+        "var",           VAR;
+        "with",          WITH;
     ]
         
 }
@@ -33,12 +32,14 @@ rule scan = parse
   | ['0'-'9']+ as value { INTEGER(big_int_of_string value) }
   | '('  { LPAREN }
   | ')'  { RPAREN }
-  | '['  { LBRACKET }
-  | ']'  { RBRACKET }
+  | '{'  { LBRACE }
+  | '}'  { RBRACE }
+  | '?'  { QUESTION }
   | ':'  { COLON }
   | ';'  { SEMICOLON }
   | '.'  { DOT }
   | ','  { COMMA }
+  | '^'  { CARET }
   | '+'  { PLUS }
   | '-'  { DASH }
   | '*'  { STAR }
