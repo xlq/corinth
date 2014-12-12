@@ -69,6 +69,28 @@ let rec actual_type = function
     | (Integer_type | Pointer_type _ | Record_type _) as t -> t
     | Named_type({sym_kind=Type_sym; sym_type=Some t}, _) -> t
 
+let rec same_type t1 t2 =
+    match t1, t2 with
+        | No_type, No_type -> true
+        | Integer_type, Integer_type -> true
+        | Pointer_type(t1), Pointer_type(t2) -> same_type t1 t2
+        | Named_type(s1, []), Named_type(s2, []) -> s1 == s2
+        | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
+        | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) -> same_type t1 t2
+        | No_type, _ | _, No_type
+        | Integer_type, _ | _, Integer_type
+        | Pointer_type _, _ | _, Pointer_type _ -> false
+
+let type_check loc expected_type why_expected given_type =
+    if not (same_type expected_type given_type) then begin
+        Errors.semantic_error loc
+            ("Type mismatch " ^ why_expected ^ ": expected `"
+                ^ string_of_type expected_type
+                ^ "' but got `"
+                ^ string_of_type given_type
+                ^ "'.")
+    end
+
 let match_args_to_params loc what params pos_args named_args =
     let remaining_params = ref params in
     let matched_params = ref [] in
@@ -111,6 +133,10 @@ let match_args_to_params loc what params pos_args named_args =
 let rec loc_of_expr = function
     | Parse_tree.Name(loc, _) -> loc
     | Parse_tree.Apply(loc, _, _) -> loc
+
+let rec loc_of_iexpr = function
+    | Name(loc, _) -> loc
+    | Apply(loc, _, _) -> loc
 
 let rec trans_unit ts = function
     | Parse_tree.Unit(loc, [name], decls) ->
@@ -299,7 +325,8 @@ and trans_expr ts = function
                 let matched_args =
                     List.map (fun (param, arg) ->
                         let arg, arg_type = trans_expr ts arg in
-                        (* TODO: Type checking. *)
+                        type_check (loc_of_iexpr arg) (unsome param.sym_type)
+                            ("for parameter `" ^ param.sym_name ^ "'") arg_type;
                         (param, arg)
                     ) (match_args_to_params loc "arguments"
                         (get_params proc_sym) pos_args named_args) in
