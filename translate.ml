@@ -79,16 +79,17 @@ let unification_scope ts body arg =
         unwind_unifs current_unifs !(ts.ts_unifications);
         ts.ts_unifications := current_unifs;
         return_value
-    with _ ->
+    with e ->
         unwind_unifs current_unifs !(ts.ts_unifications);
         ts.ts_unifications := current_unifs;
-        raise
+        raise e
 
 let unify ts v t =
     (* TODO: Occurs check? *)
     assert (match v.sym_type with None -> true | Some _ -> false);
     ts.ts_unifications := v :: !(ts.ts_unifications);
-    v.sym_type <- Some t
+    v.sym_type <- Some t;
+    prerr_endline ("Unifying " ^ full_name v ^ " -> " ^ string_of_type t)
 
 (* Return the actual type (follow Named_type) *)
 let rec actual_type = function
@@ -374,17 +375,19 @@ and trans_expr ts = function
         begin match proc_type with
             | Proc_type(proc_sym) ->
                 (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
-                let matched_args =
-                    List.map (fun (param, arg) ->
-                        let arg, arg_type = trans_expr ts arg in
-                        coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
-                            ("for parameter `" ^ param.sym_name ^ "'") arg_type;
-                        (param, arg)
-                    ) (match_args_to_params loc "arguments"
-                        (get_params proc_sym) pos_args named_args) in
-                (* TODO: Bind type variables in return type. *)
-                (Apply(loc, proc, matched_args),
-                 unsome proc_sym.sym_type)
+                unification_scope ts (fun () ->
+                    let matched_args =
+                        List.map (fun (param, arg) ->
+                            let arg, arg_type = trans_expr ts arg in
+                            coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
+                                ("for parameter `" ^ param.sym_name ^ "'") arg_type;
+                            (param, arg)
+                        ) (match_args_to_params loc "arguments"
+                            (get_params proc_sym) pos_args named_args) in
+                    (* TODO: Bind type variables in return type. *)
+                    (Apply(loc, proc, matched_args),
+                     unsome proc_sym.sym_type)
+                ) ()
         end
 
 
@@ -424,8 +427,8 @@ let finish_trans ts =
             proc_sym.sym_code <- Some !stmts';
             subs := proc_sym :: !subs;
             proc_sym.sym_translated <- true
-    ) !(ts.ts_todo)
+    ) !(ts.ts_todo);
 
     (* XXX: Don't do this here! *)
-    (*let c_state = Codegen_c.new_state () in
-    List.iter (Codegen_c.trans_sub c_state) !subs*)
+    let c_state = Codegen_c.new_state () in
+    List.iter (Codegen_c.trans_sub c_state) !subs

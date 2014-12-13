@@ -35,28 +35,31 @@ let c_name_of_type_sym s sym =
 
 let c_name_of_type s = function
     | Integer_type -> "int"
-    | Named_type tp -> c_name_of_type_sym s tp
+    | Named_type({sym_kind=Type_sym} as type_sym, _) -> c_name_of_type_sym s type_sym
+    | Named_type({sym_kind=Type_param}, []) -> "void"
 
 let c_name_of_var s sym =
     match sym.sym_kind with
-        | Var -> c_name_of_sym s sym
+        | Proc|Var -> c_name_of_sym s sym
         | Param -> c_name_of_local s sym
 
-(*
 let rec trans_istmt s = function
-    | Assignment(loc, lhs, rhs) ->
-        emit s ("(" ^ trans_iexpr s lhs ^ ") = (" ^ trans_iexpr s rhs ^ ");")
+    | Call(loc, proc_e, args) ->
+        emit s (trans_iexpr s (Apply(loc, proc_e, args)) ^ ";")
 
 and trans_istmts s = List.iter (trans_istmt s)
 
 and trans_iexpr s = function
-    | Name(loc, sym) -> begin
-        match sym.sym_kind, sym.sym_param_mode with
-            | Parameter, (Var_param|Out_param) ->
-                "( *" ^ c_name_of_var s sym ^ ")"
+    | Name(loc, sym) ->
+        begin match sym.sym_kind, sym.sym_param_mode with
+            | Param, (Var_param|Out_param) ->
+                "*" ^ c_name_of_var s sym
             | _ -> c_name_of_var s sym
-    end
-    | Binop(loc, lhs, op, rhs) ->
+        end
+    | Apply(loc, proc_e, args) ->
+        trans_iexpr s proc_e ^ "("
+        ^ String.concat ", " (List.map (fun (_, arg) -> trans_iexpr s arg) args) ^ ")"
+    (*| Binop(loc, lhs, op, rhs) ->
         "(" ^ trans_iexpr s lhs ^ ") "
             ^ (match op with
                 | Add -> "+"
@@ -65,71 +68,83 @@ and trans_iexpr s = function
                 | Divide -> "/")
             ^ " (" ^ trans_iexpr s rhs ^ ")"
     | Field_access(loc, lhs, field) -> begin
-        (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field
-    end
+        (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field*)
 
-let is_scalar = function
+let rec is_scalar = function
     | Integer_type -> true
-    | Named_type(type_sym) ->
-        match type_sym.sym_kind with
-            | Unit | Variable | Subprogram | Parameter -> assert false
-            | Class_type -> false
+    | Record_type _ -> false
+    | Named_type({sym_kind=Type_sym; sym_type=Some t}, _) -> is_scalar t
+    | Named_type({sym_kind=Type_param}, []) -> false
+    | Pointer_type _ -> true
 
 let is_param_by_value param_sym =
     match param_sym.sym_param_mode with
         | Var_param | Out_param -> false
         | Const_param -> is_scalar (unsome param_sym.sym_type)
-*)
 
 let func_prototype s proc_sym =
-    (match sub_sym.sym_type with
-        | None -> "void"
+    (match proc_sym.sym_type with
+        | Some No_type -> "void"
         | Some t -> c_name_of_type s t)
-    ^ " " ^ c_name_of_sym s sub_sym ^ "("
+    ^ " " ^ c_name_of_sym s proc_sym ^ "("
     ^ String.concat ", " (List.map (fun param ->
             c_name_of_type s (unsome param.sym_type)
             ^ " " ^ (if is_param_by_value param then "" else "*")
             ^ c_name_of_local s param
-        ) (parameters sub_sym))
+        ) (get_params proc_sym))
     ^ ")"
 
-let trans_sub s sub_sym =
-    let prerequisites = find_needed_syms sub_sym in
-    List.iter (fun sym ->
-        if not sym.sym_backend_translated then begin
-            sym.sym_backend_translated <- true;
-            match sym.sym_kind with
-                | Unit -> assert false;
-                | Variable ->
-                    if sym.sym_parent.sym_kind = Unit then begin
-                        if sym.sym_parent == sub_sym then () else
-                            emit s ("extern " ^ c_name_of_type s (unsome sym.sym_type)
-                                ^ " " ^ c_name_of_var s sym ^ ";")
-                    end
-                | Parameter ->
-                    assert (sym.sym_parent == sub_sym)
-                | Class_type ->
-                    emit s (c_name_of_type_sym s sym ^ " {");
+let rec declare s complete sym =
+    if not sym.sym_backend_translated then begin
+        if complete then declare_prerequisites s sym;
+        match sym with
+            | {sym_kind=Type_sym; sym_type=Some(Record_type None)} as type_sym ->
+                if complete then begin
+                    type_sym.sym_backend_translated <- true;
+                    emit s (c_name_of_type_sym s type_sym ^ " {");
                     begin let s = indent s in
-                        List.iter (fun member ->
-                            match member.sym_kind with
-                                | Unit | Parameter | Class_type -> assert false
-                                | Variable ->
-                                    emit s (c_name_of_type s (unsome member.sym_type)
-                                        ^ " " ^ c_name_of_local s member ^ ";")
-                                | Subprogram -> ()
-                        ) sym.sym_locals
+                        List.iter (function
+                            | {sym_kind=Type_param} -> ()
+                            | {sym_kind=Var} as field ->
+                                emit s (c_name_of_type s (unsome field.sym_type)
+                                    ^ " " ^ c_name_of_local s field ^ ";")
+                        ) type_sym.sym_locals
                     end;
                     emit s "};";
                     emit s ""
-                | Subprogram ->
-                    emit s (func_prototype s sym ^ ";")
-        end
-    ) prerequisites;
+                end else begin
+                    emit s (c_name_of_type_sym s type_sym ^ ";") (* "struct foo;" *)
+                end
+            | {sym_kind=Proc} as proc_sym ->
+                emit s (func_prototype s proc_sym ^ ";")
+    end
 
+and declare_type s complete = function
+    | No_type -> ()
+    | Pointer_type(t) ->
+        declare_type s false t
+    | Integer_type -> ()
+    | Named_type({sym_kind=Type_param}, []) -> ()
+    | Named_type({sym_kind=Type_sym} as type_sym, _) -> declare s complete type_sym
+
+and declare_prerequisites s = function
+    | {sym_kind=Type_sym; sym_type=Some(Record_type None)} as type_sym ->
+        List.iter (function
+            | {sym_kind=Type_param} -> ()
+            | {sym_kind=Var} as field ->
+                declare_type s true (unsome field.sym_type)
+        ) type_sym.sym_locals
+    | {sym_kind=Var|Param} as var_sym ->
+        declare_type s true (unsome var_sym.sym_type)
+    | {sym_kind=Type_param} -> ()
+    | {sym_kind=Proc} as proc_sym ->
+        declare_type s true (unsome proc_sym.sym_type);
+        List.iter (declare_prerequisites s) proc_sym.sym_locals
+
+let trans_sub s proc_sym =
+    declare_prerequisites s proc_sym;
     emit s "";
-
-    emit s (func_prototype s sub_sym);
+    emit s (func_prototype s proc_sym);
     emit s "{";
-    trans_istmts (indent s) (unsome sub_sym.sym_code);
+    trans_istmts (indent s) (unsome proc_sym.sym_code);
     emit s "}"
