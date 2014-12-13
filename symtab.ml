@@ -16,7 +16,11 @@ type symbol = {
     sym_kind: sym_kind;
     sym_name: string;
     mutable sym_defined: loc option; (* Can be None for parent units that aren't loaded/defined. *)
-    mutable sym_type: ttype option; (* Type of variable/param, return type of function *)
+    (* Var | Param -> sym_type is the type of the variable/parameter.
+       Proc -> sym_type is the return type of the procedure.
+       Type_sym -> sym_type is the definition of the type.
+       Type_param -> sym_type is what the type parameter is currently unified with. *)
+    mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
     mutable sym_dispatching: bool; (* Parameter is dispatching (declared "disp") *)
     mutable sym_param_mode: param_mode;

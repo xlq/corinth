@@ -14,6 +14,7 @@ type translation_state = {
     ts_scope: symbol;
     ts_todo: todo list ref;
     ts_block: istmt list ref option;
+    ts_unifications: symbol list ref;
 }
 
 let new_translation_state root = {
@@ -21,6 +22,7 @@ let new_translation_state root = {
     ts_scope = root;
     ts_todo = ref [];
     ts_block = None;
+    ts_unifications = ref [];
 }
 
 let todo ts x =
@@ -64,6 +66,30 @@ let search_scopes_or_fail ts loc name =
         | Some sym -> sym
         | None -> undefined_symbol ts loc name
 
+let rec unwind_unifs stop_at = function
+    | unifs when unifs == stop_at -> ()
+    | [] -> ()
+    | sym::tail -> sym.sym_type <- None; unwind_unifs stop_at tail
+
+(* Wrapper function that removes any unifications that are done in "body". *)
+let unification_scope ts body arg =
+    let current_unifs = !(ts.ts_unifications) in
+    try
+        let return_value = body arg in
+        unwind_unifs current_unifs !(ts.ts_unifications);
+        ts.ts_unifications := current_unifs;
+        return_value
+    with _ ->
+        unwind_unifs current_unifs !(ts.ts_unifications);
+        ts.ts_unifications := current_unifs;
+        raise
+
+let unify ts v t =
+    (* TODO: Occurs check? *)
+    assert (match v.sym_type with None -> true | Some _ -> false);
+    ts.ts_unifications := v :: !(ts.ts_unifications);
+    v.sym_type <- Some t
+
 (* Return the actual type (follow Named_type) *)
 let rec actual_type = function
     | (Integer_type | Pointer_type _ | Record_type _) as t -> t
@@ -74,22 +100,46 @@ let rec same_type t1 t2 =
         | No_type, No_type -> true
         | Integer_type, Integer_type -> true
         | Pointer_type(t1), Pointer_type(t2) -> same_type t1 t2
+        
         | Named_type(s1, []), Named_type(s2, []) -> s1 == s2
         | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
         | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) -> same_type t1 t2
+
         | No_type, _ | _, No_type
         | Integer_type, _ | _, Integer_type
         | Pointer_type _, _ | _, Pointer_type _ -> false
 
-let type_check loc expected_type why_expected given_type =
-    if not (same_type expected_type given_type) then begin
-        Errors.semantic_error loc
-            ("Type mismatch " ^ why_expected ^ ": expected `"
-                ^ string_of_type expected_type
-                ^ "' but got `"
-                ^ string_of_type given_type
-                ^ "'.")
-    end
+let rec coerce ts loc target_type why_target source_type =
+    match target_type, source_type with
+        | t1, t2 when t1 == t2 -> () (* short-cut if the types are exactly the same *)
+        | No_type, No_type -> ()
+        | Integer_type, Integer_type -> ()
+        | Pointer_type(t1), Pointer_type(t2) -> coerce ts loc t1 why_target t2
+        | Named_type(s1, []), Named_type(s2, []) when s1 == s2 -> () (* same symbol *)
+        | Named_type({sym_kind=Type_param; sym_type=Some t1}, []), t2
+        | t2, Named_type({sym_kind=Type_param; sym_type=Some t1}, []) ->
+            (* Follow type parameter unification. *)
+            coerce ts loc t1 why_target t2
+        | Named_type({sym_kind=Type_param; sym_type=None} as tp, []), t2 ->
+            (* Target type parameter isn't unified, so it could be anything.
+               Now we know it must be t2. *)
+            unify ts tp t2
+        | Named_type(s1, params1), Named_type(s2, params2) when s1 == s2 ->
+            List.iter2 (fun (param1, arg1) (param2, arg2) ->
+                assert (param1 == param2);
+                coerce ts loc arg1
+                    ("for parameter `" ^ param1.sym_name ^ "' of type `"
+                        ^ name_for_error ts s1 ^ "'") arg2
+            ) params1 params2
+        (* Type mismatches. *)
+        | No_type, _ | _, No_type
+        | Integer_type, _ | _, Integer_type
+        | Pointer_type _, _ | _, Pointer_type _
+        | Named_type _, Named_type _ ->
+            Errors.semantic_error loc
+                ("Type mismatch " ^ why_target ^ ": expected `"
+                    ^ string_of_type target_type
+                    ^ "' but got `" ^ string_of_type source_type ^ "'.")
 
 let match_args_to_params loc what params pos_args named_args =
     let remaining_params = ref params in
@@ -212,6 +262,8 @@ and trans_type ts = function
         begin match search_scopes_or_fail ts loc name with
             | {sym_kind=Type_sym} as typ ->
                 Named_type(typ, [])
+            | {sym_kind=Type_param} as typ_p ->
+                Named_type(typ_p, [])
             | bad_sym ->
                 Errors.semantic_error loc
                     ("Type expected but " ^ describe_sym bad_sym
@@ -325,7 +377,7 @@ and trans_expr ts = function
                 let matched_args =
                     List.map (fun (param, arg) ->
                         let arg, arg_type = trans_expr ts arg in
-                        type_check (loc_of_iexpr arg) (unsome param.sym_type)
+                        coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
                             ("for parameter `" ^ param.sym_name ^ "'") arg_type;
                         (param, arg)
                     ) (match_args_to_params loc "arguments"
