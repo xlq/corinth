@@ -18,3 +18,7 @@ let rec maybe_find f = function
     | [] -> None
     | x::l when f x -> Some x
     | x::l -> maybe_find f l
+
+let enumerate l =
+    let i = ref (-1) in
+    List.map (fun x -> incr i; (!i, x)) l

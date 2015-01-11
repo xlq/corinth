@@ -173,29 +173,29 @@ let rec match_types ts loc t1 t2 =
                     ^ string_of_type t2 ^ "'.")
 
 let match_args_to_params loc what params pos_args named_args =
-    let remaining_params = ref params in
+    let remaining_params = ref (enumerate params) in
     let matched_params = ref [] in
     List.iter (fun pos_arg ->
         match !remaining_params with
-            | param::params ->
+            | (i,param)::params ->
                 remaining_params := params;
-                matched_params := (param, pos_arg) :: !matched_params
+                matched_params := (i, param, pos_arg) :: !matched_params
             | [] ->
                 Errors.semantic_error loc ("Too many " ^ what ^ ".");
                 raise Errors.Compile_error
     ) pos_args;
     List.iter (fun (name, arg) ->
         let rec search = function
-            | param::params when name = param.sym_name ->
-                matched_params := (param, arg) :: !matched_params;
+            | (i,param)::params when name = param.sym_name ->
+                matched_params := (i, param, arg) :: !matched_params;
                 params
-            | param::params ->
-                param :: search params
+            | (i,param)::params ->
+                (i,param) :: search params
             | [] ->
-                match maybe_find (fun (param, arg) ->
+                match maybe_find (fun (i, param, arg) ->
                     name = param.sym_name)
                 !matched_params with
-                    | Some (param, arg) ->
+                    | Some (i, param, arg) ->
                         Errors.semantic_error loc
                             ("Parameter `" ^ name ^ "' given twice.");
                         raise Errors.Compile_error
@@ -205,11 +205,12 @@ let match_args_to_params loc what params pos_args named_args =
                         raise Errors.Compile_error
         in remaining_params := search !remaining_params
     ) named_args;
-    List.iter (fun remaining_param ->
+    List.iter (fun (i, remaining_param) ->
         Errors.semantic_error loc
             ("Missing parameter `" ^ remaining_param.sym_name ^ "'.")
     ) !remaining_params;
-    !matched_params
+    List.map (fun (_,param,arg) -> (param, arg))
+        (List.sort (fun (i1,_,_) (i2,_,_) -> compare i1 i2) !matched_params)
 
 let rec loc_of_expr = function
     | Parse_tree.Name(loc, _)

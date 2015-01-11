@@ -135,7 +135,7 @@ let get_type_params sym =
 let rec get_fields sym =
     match sym with
         | {sym_kind=Type_sym; sym_type=Some(Record_type(base)); sym_locals=fields} ->
-            (match base with Some t -> get_fields t | None -> []) @ (List.rev fields)
+            fields @ (match base with Some t -> get_fields t | None -> [])
         | _ -> raise (Failure "get_fields")
 
 let get_params sym =
