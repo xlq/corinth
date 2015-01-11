@@ -29,6 +29,7 @@ and ttype =
 and stmt =
     | Decl of decl
     | Expr of expr
+    | Return of loc * expr option
 
 and expr =
     | Name of loc * dotted_name

@@ -67,6 +67,10 @@ let rec trans_istmt s = function
         emit s (trans_iexpr s (Apply(loc, proc_e, args)) ^ ";")
     | Assign(loc, dest, src) ->
         emit s (trans_iexpr s dest ^ " = " ^ trans_iexpr s src ^ ";")
+    | Return(loc, None) ->
+        emit s ("return;")
+    | Return(loc, Some e) ->
+        emit s ("return " ^ trans_iexpr s e ^ ";")
 
 and trans_istmts s = List.iter (trans_istmt s)
 
@@ -171,11 +175,11 @@ let declare_locals s proc_sym =
 
 let trans_sub s proc_sym =
     declare_prerequisites s proc_sym;
-    emit s "";
     emit s (func_prototype s proc_sym);
     emit s "{";
     (let s = indent s in
         declare_locals s proc_sym;
         trans_istmts s (unsome proc_sym.sym_code)
     );
-    emit s "}"
+    emit s "}";
+    emit s ""

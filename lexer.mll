@@ -14,6 +14,7 @@
         "is",            IS;
         "override",      OVERRIDE;
         "proc",          PROC;
+        "return",        RETURN;
         "type",          TYPE;
         "unit",          UNIT;
         "var",           VAR;

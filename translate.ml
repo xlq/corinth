@@ -41,7 +41,7 @@ let emit ts x =
 
 (* Return the name of the given symbol suitable for an error message. *)
 let name_for_error ts sym =
-    if sym_is_grandchild ts.ts_scope sym then sym.sym_name
+    if (sym_is_grandchild ts.ts_scope sym) || (ts.ts_scope == sym) then sym.sym_name
     else full_name sym
 
 let check_for_duplicate_definition scope loc name =
@@ -194,7 +194,10 @@ let rec loc_of_expr = function
 
 let rec loc_of_iexpr = function
     | Name(loc, _) -> loc
-    | Apply(loc, _, _) -> loc
+    | Int_literal(loc, _)
+    | Apply(loc, _, _)
+    | Record_cons(loc, _, _)
+    | Field_access(loc, _, _) -> loc
 
 let rec trans_unit ts = function
     | Parse_tree.Unit(loc, [name], decls) ->
@@ -358,6 +361,28 @@ and trans_stmt ts = function
         Errors.semantic_error
             (loc_of_expr e)
             "Statement expected but expression found."
+    | Parse_tree.Return(loc, Some e) ->
+        begin match ts.ts_scope with
+            | {sym_kind=Proc; sym_type=Some No_type} ->
+                Errors.semantic_error (loc_of_expr e)
+                    ("Procedure `" ^ name_for_error ts ts.ts_scope
+                     ^ "' has no return type, so cannot return a value.")
+            | {sym_kind=Proc; sym_type=Some t} ->
+                let e, e_type = trans_expr ts (Some t) e in
+                coerce ts (loc_of_iexpr e) t ("for returned value") e_type;
+                emit ts (Return(loc, Some e))
+            | _ -> assert false
+        end
+    | Parse_tree.Return(loc, None) ->
+        begin match ts.ts_scope with
+            | {sym_kind=Proc; sym_type=Some No_type} ->
+                emit ts (Return(loc, None))
+            | {sym_kind=Proc; sym_type=Some _} ->
+                Errors.semantic_error loc
+                    ("Procedure `" ^ name_for_error ts ts.ts_scope
+                     ^ "' must return a value.")
+            | _ -> assert false
+        end
 
 (* Translate expression and return (iexpr * ttype) pair.
    target_type is the type of the expression's context, if known.

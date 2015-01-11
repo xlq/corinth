@@ -18,7 +18,7 @@
 %token <Big_int.big_int> INTEGER
 
 /* Keywords */
-%token ABSTRACT DISP END IS OVERRIDE PROC TYPE UNIT VAR WITH
+%token ABSTRACT DISP END IS OVERRIDE PROC RETURN TYPE UNIT VAR WITH
 
 
 %token LPAREN RPAREN LBRACE RBRACE QUESTION COLON SEMICOLON DOT COMMA STAR
@@ -114,6 +114,8 @@ decl_or_stmt:
     | stmt { $1 }
 stmt:
     | expr SEMICOLON { Expr $1 }
+    | RETURN expr SEMICOLON { Return(loc(), Some $2) }
+    | RETURN SEMICOLON { Return(loc(), None) }
 
 expr:
     | LPAREN expr RPAREN { $2 }

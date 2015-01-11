@@ -46,6 +46,7 @@ and ttype =
 and istmt =
     | Call of loc * iexpr * (symbol * iexpr) list
     | Assign of loc * iexpr * iexpr
+    | Return of loc * iexpr option
 
 and iexpr =
     | Name of loc * symbol
