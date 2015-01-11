@@ -1,3 +1,4 @@
+open Big_int
 open Symtab
 open Misc
 
@@ -42,33 +43,7 @@ let c_name_of_var s sym =
     match sym.sym_kind with
         | Proc|Var -> c_name_of_sym s sym
         | Param -> c_name_of_local s sym
-
-let rec trans_istmt s = function
-    | Call(loc, proc_e, args) ->
-        emit s (trans_iexpr s (Apply(loc, proc_e, args)) ^ ";")
-
-and trans_istmts s = List.iter (trans_istmt s)
-
-and trans_iexpr s = function
-    | Name(loc, sym) ->
-        begin match sym.sym_kind, sym.sym_param_mode with
-            | Param, (Var_param|Out_param) ->
-                "*" ^ c_name_of_var s sym
-            | _ -> c_name_of_var s sym
-        end
-    | Apply(loc, proc_e, args) ->
-        trans_iexpr s proc_e ^ "("
-        ^ String.concat ", " (List.map (fun (_, arg) -> trans_iexpr s arg) args) ^ ")"
-    (*| Binop(loc, lhs, op, rhs) ->
-        "(" ^ trans_iexpr s lhs ^ ") "
-            ^ (match op with
-                | Add -> "+"
-                | Subtract -> "-"
-                | Multiply -> "*"
-                | Divide -> "/")
-            ^ " (" ^ trans_iexpr s rhs ^ ")"
-    | Field_access(loc, lhs, field) -> begin
-        (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field*)
+        | Temp -> "t" ^ sym.sym_name ^ "_"
 
 let rec is_scalar = function
     | Integer_type -> true
@@ -81,6 +56,41 @@ let is_param_by_value param_sym =
     match param_sym.sym_param_mode with
         | Var_param | Out_param -> false
         | Const_param -> is_scalar (unsome param_sym.sym_type)
+
+let rec trans_istmt s = function
+    | Call(loc, proc_e, args) ->
+        emit s (trans_iexpr s (Apply(loc, proc_e, args)) ^ ";")
+    | Assign(loc, dest, src) ->
+        emit s (trans_iexpr s dest ^ " = " ^ trans_iexpr s src ^ ";")
+
+and trans_istmts s = List.iter (trans_istmt s)
+
+and trans_iexpr s = function
+    | Name(loc, sym) ->
+        begin match sym.sym_kind, sym.sym_param_mode with
+            | Param, (Var_param|Out_param) ->
+                "*" ^ c_name_of_var s sym
+            | _ -> c_name_of_var s sym
+        end
+    | Int_literal(loc, n) ->
+        string_of_big_int n
+    | Apply(loc, proc_e, args) ->
+        trans_iexpr s proc_e ^ "("
+        ^ String.concat ", " (List.map (fun (param, arg) ->
+            (if is_param_by_value param then trans_iexpr s arg
+            else "&(" ^ trans_iexpr s arg ^ ")")) args) ^ ")"
+    (*| Binop(loc, lhs, op, rhs) ->
+        "(" ^ trans_iexpr s lhs ^ ") "
+            ^ (match op with
+                | Add -> "+"
+                | Subtract -> "-"
+                | Multiply -> "*"
+                | Divide -> "/")
+            ^ " (" ^ trans_iexpr s rhs ^ ")"
+    | Field_access(loc, lhs, field) -> begin
+        (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field*)
+    | Field_access(loc, lhs, field) ->
+        (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field
 
 let func_prototype s proc_sym =
     (match proc_sym.sym_type with
@@ -134,17 +144,29 @@ and declare_prerequisites s = function
             | {sym_kind=Var} as field ->
                 declare_type s true (unsome field.sym_type)
         ) type_sym.sym_locals
-    | {sym_kind=Var|Param} as var_sym ->
+    | {sym_kind=Var|Param|Temp} as var_sym ->
         declare_type s true (unsome var_sym.sym_type)
     | {sym_kind=Type_param} -> ()
     | {sym_kind=Proc} as proc_sym ->
         declare_type s true (unsome proc_sym.sym_type);
         List.iter (declare_prerequisites s) proc_sym.sym_locals
 
+let declare_locals s proc_sym =
+    List.iter (fun sym ->
+        match sym.sym_kind with
+            | Temp ->
+                emit s (c_name_of_type s (unsome sym.sym_type)
+                    ^ " " ^ c_name_of_var s sym ^ ";");
+            | _ -> ()
+    ) proc_sym.sym_locals
+
 let trans_sub s proc_sym =
     declare_prerequisites s proc_sym;
     emit s "";
     emit s (func_prototype s proc_sym);
     emit s "{";
-    trans_istmts (indent s) (unsome proc_sym.sym_code);
+    (let s = indent s in
+        declare_locals s proc_sym;
+        trans_istmts s (unsome proc_sym.sym_code)
+    );
     emit s "}"

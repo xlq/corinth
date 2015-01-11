@@ -17,6 +17,11 @@ type translation_state = {
     ts_unifications: symbol list ref;
 }
 
+type expr_destiny =
+    | ED_Discard
+    | ED_LValue of iexpr * ttype
+    | ED_RValue of ttype option
+
 let new_translation_state root = {
     ts_root = root;
     ts_scope = root;
@@ -182,7 +187,8 @@ let match_args_to_params loc what params pos_args named_args =
     !matched_params
 
 let rec loc_of_expr = function
-    | Parse_tree.Name(loc, _) -> loc
+    | Parse_tree.Name(loc, _)
+    | Parse_tree.Int_literal(loc, _)
     | Parse_tree.Apply(loc, _, _) -> loc
 
 let rec loc_of_iexpr = function
@@ -242,12 +248,13 @@ and trans_decl ts = function
         trans_type_params {ts with ts_scope = type_sym} type_params;
         type_sym.sym_type <- Some (Record_type(None)); (* TODO: base record *)
         List.iter (fun (loc, name, ttype) ->
+            let ttype' = trans_type ts ttype in
             match name with
                 | Some name ->
                     check_for_duplicate_definition type_sym loc name;
-                    ignore (create_sym type_sym loc name Var)
+                    (create_sym type_sym loc name Var).sym_type <- Some ttype'
                 | None ->
-                    ignore (create_sym type_sym loc "" Var)
+                    (create_sym type_sym loc "" Var).sym_type <- Some ttype'
         ) fields
 
 and trans_type_params ts type_params =
@@ -308,7 +315,7 @@ and trans_stmt ts = function
         emit ts (Assignment(loc, lhs', rhs'))*)
     | Parse_tree.Decl decl -> trans_decl ts decl
     | Parse_tree.Expr((Parse_tree.Apply _) as e) ->
-        let call, tcall = trans_expr ts e in
+        let call, tcall = trans_expr ts ED_Discard e in
         begin match call, tcall with
             | Apply(loc, proc, args), No_type ->
                 emit ts (Call(loc, proc, args))
@@ -322,7 +329,7 @@ and trans_stmt ts = function
             (loc_of_expr e)
             "Statement expected but expression found."
 
-and trans_expr ts = function
+and trans_expr ts destiny = function
     | Parse_tree.Name(loc, name) ->
         let trans_sym sym =
             match sym.sym_kind with
@@ -370,15 +377,18 @@ and trans_expr ts = function
                 raise Errors.Compile_error
             | Right(expr, tp) -> (expr, tp)
         end
+    | Parse_tree.Int_literal(loc, n) ->
+        (Int_literal(loc, n), Integer_type)
     | Parse_tree.Apply(loc, proc, (pos_args, named_args)) ->
-        let proc, proc_type = trans_expr ts proc in
+        let proc, proc_type = trans_expr ts (ED_RValue None) proc in
         begin match proc_type with
             | Proc_type(proc_sym) ->
                 (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
                 unification_scope ts (fun () ->
                     let matched_args =
                         List.map (fun (param, arg) ->
-                            let arg, arg_type = trans_expr ts arg in
+                            assert (match param.sym_type with Some _ -> true | None -> false);
+                            let arg, arg_type = trans_expr ts (ED_RValue param.sym_type) arg in
                             coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
                                 ("for parameter `" ^ param.sym_name ^ "'") arg_type;
                             (param, arg)
@@ -388,6 +398,42 @@ and trans_expr ts = function
                     (Apply(loc, proc, matched_args),
                      unsome proc_sym.sym_type)
                 ) ()
+        end
+    | Parse_tree.Record_cons(loc, (pos_fields, named_fields)) ->
+        (* Get record type from context. *)
+        let check_rec_type t =
+            match t with
+                | Named_type({sym_type=Some (Record_type _)} as sym, []) -> sym
+                | _ -> Errors.semantic_error loc
+                    ("Value of tye `" ^ string_of_type t
+                        ^ "' expected but record constructor found.");
+                    raise Errors.Compile_error
+        in
+        let match_rec_fields rec_sym dest_lvalue =
+            (* Match expressions to record's fields. *)
+            List.iter (fun (field, expr) ->
+                let loc = loc_of_expr expr in
+                let dest_field = Field_access(loc, dest_lvalue, field) in
+                let expr, expr_type = trans_expr ts
+                    (ED_LValue(dest_field, (unsome field.sym_type))) expr in
+                coerce ts loc (unsome field.sym_type)
+                    ("for field `" ^ field.sym_name ^ "'") expr_type;
+                emit ts (Assign(loc, dest_field, expr))
+            ) (List.rev (match_args_to_params loc "record fields"
+                (get_fields rec_sym) pos_fields named_fields));
+            (dest_lvalue, Named_type(rec_sym, []))
+        in
+        begin match destiny with
+            | ED_Discard | ED_RValue(None) ->
+                Errors.semantic_error loc
+                    ("Type of this record is not obvious from context.");
+                raise Errors.Compile_error
+            | ED_LValue(dest, t) ->
+                match_rec_fields (check_rec_type t) dest
+            | ED_RValue(Some t) ->
+                let rec_sym = check_rec_type t in
+                let dest = create_temp ts.ts_scope loc t in
+                match_rec_fields rec_sym (Name(loc, dest))
         end
 
 

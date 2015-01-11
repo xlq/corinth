@@ -1,3 +1,4 @@
+open Big_int
 open Misc
 
 type loc = Lexing.position
@@ -10,6 +11,7 @@ type sym_kind =
     | Type_sym
     | Type_param
     | Param
+    | Temp
 
 type symbol = {
     sym_parent: symbol; (* Parent symbol (this symbol is in sym_parent.sym_locals). *)
@@ -43,9 +45,11 @@ and ttype =
 
 and istmt =
     | Call of loc * iexpr * (symbol * iexpr) list
+    | Assign of loc * iexpr * iexpr
 
 and iexpr =
     | Name of loc * symbol
+    | Int_literal of loc * big_int
     | Apply of loc * iexpr * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
 
@@ -88,6 +92,27 @@ let create_sym parent loc name kind =
         sym_name = name;
         sym_defined = Some loc;
         sym_type = None;
+        sym_locals = [];
+        sym_dispatching = false;
+        sym_param_mode = Const_param;
+        sym_code = None;
+        sym_selected = false;
+        sym_translated = false;
+        sym_backend_translated = false;
+    } in
+    parent.sym_locals <- parent.sym_locals @ [new_sym];
+    new_sym
+
+let temp_counter = ref 0
+
+let create_temp parent loc ttype =
+    incr temp_counter;
+    let new_sym = {
+        sym_parent = parent;
+        sym_kind = Temp;
+        sym_name = string_of_int !temp_counter;
+        sym_defined = Some loc;
+        sym_type = Some ttype;
         sym_locals = [];
         sym_dispatching = false;
         sym_param_mode = Const_param;

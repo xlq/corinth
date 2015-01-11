@@ -112,7 +112,9 @@ stmt:
 expr:
     | LPAREN expr RPAREN { $2 }
     | dotted_name { Name(loc(), $1) }
+    | INTEGER { Int_literal(loc(), $1) }
     | expr LPAREN expr_map RPAREN { Apply(loc(), $1, $3) }
+    | LBRACE expr_map RBRACE { Record_cons(loc(), $2) }
 
 expr_map:
     | expr { ([$1], []) }

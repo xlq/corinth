@@ -1,3 +1,5 @@
+open Big_int
+
 type loc = Lexing.position
 type dotted_name = string list
 
@@ -29,4 +31,6 @@ and stmt =
 
 and expr =
     | Name of loc * dotted_name
+    | Int_literal of loc * big_int
     | Apply of loc * expr * expr args
+    | Record_cons of loc * expr args

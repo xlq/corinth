@@ -1,3 +1,5 @@
+open Big_int
+
 type loc = Lexing.position
 type dotted_name = string list
 
@@ -8,6 +10,7 @@ type sym_kind =
     | Type_sym
     | Type_param
     | Param
+    | Temp
 
 type symbol = {
     sym_parent: symbol; (* Parent symbol (this symbol is in sym_parent.sym_locals). *)
@@ -41,15 +44,18 @@ and ttype =
 
 and istmt =
     | Call of loc * iexpr * (symbol * iexpr) list
+    | Assign of loc * iexpr * iexpr
 
 and iexpr =
     | Name of loc * symbol
+    | Int_literal of loc * big_int
     | Apply of loc * iexpr * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
 
 val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)
 val create_sym : symbol -> loc -> string -> sym_kind -> symbol
+val create_temp : symbol -> loc -> ttype -> symbol
 val get_type_params : symbol -> symbol list
 val get_fields : symbol -> symbol list (* get record fields, including from base type *)
 val get_params : symbol -> symbol list (* get proc parameters *)
