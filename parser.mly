@@ -72,6 +72,8 @@ decls:
 decl:
     | TYPE IDENT opt_type_params EQ type_defn SEMICOLON
         { Type_decl(loc(), $2, $3, $5) }
+    | VAR IDENT opt_type opt_init SEMICOLON
+        { Var_decl(loc(), $2, $3, $4) }
     | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS proc_body END IDENT SEMICOLON
         { check_end (rhs_start_pos 2, $2) (rhs_start_pos 11, $11);
           Proc_decl(loc(), $2, $3, $5, $7, $9) }
@@ -85,6 +87,10 @@ type_params:
     | type_param COMMA type_params { $1::$3 }
 type_param:
     | IDENT { (loc(), $1) }
+
+opt_init:
+    | /* empty */ { None }
+    | ASSIGN expr { Some $2 }
 
 params:
     | /* empty */ { [] }

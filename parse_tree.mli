@@ -11,6 +11,7 @@ type unit_decl =
 
 and decl =
     | Type_decl of loc * string * (loc * string) list * type_defn
+    | Var_decl of loc * string * ttype option * expr option
     | Proc_decl of loc * string * (loc * string) list * param list * ttype option * stmt list
 
 and type_defn =

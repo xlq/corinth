@@ -51,6 +51,7 @@ and iexpr =
     | Name of loc * symbol
     | Int_literal of loc * big_int
     | Apply of loc * iexpr * (symbol * iexpr) list
+    | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
 
 let dummy_loc = {
@@ -130,7 +131,7 @@ let get_type_params sym =
 let rec get_fields sym =
     match sym with
         | {sym_kind=Type_sym; sym_type=Some(Record_type(base)); sym_locals=fields} ->
-            fields @ (match base with Some t -> get_fields t | None -> [])
+            (match base with Some t -> get_fields t | None -> []) @ (List.rev fields)
         | _ -> raise (Failure "get_fields")
 
 let get_params sym =

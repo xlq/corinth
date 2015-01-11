@@ -41,7 +41,12 @@ let c_name_of_type s = function
 
 let c_name_of_var s sym =
     match sym.sym_kind with
-        | Proc|Var -> c_name_of_sym s sym
+        | Proc -> c_name_of_sym s sym
+        | Var ->
+            begin match sym.sym_parent.sym_kind with
+                | Proc -> c_name_of_local s sym (* local variable *)
+                | Unit -> c_name_of_sym s sym   (* global variable *)
+            end
         | Param -> c_name_of_local s sym
         | Temp -> "t" ^ sym.sym_name ^ "_"
 
@@ -89,6 +94,10 @@ and trans_iexpr s = function
             ^ " (" ^ trans_iexpr s rhs ^ ")"
     | Field_access(loc, lhs, field) -> begin
         (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field*)
+    | Record_cons(loc, rec_sym, fields) ->
+        "(" ^ c_name_of_type_sym s rec_sym ^ "){" ^
+            String.concat ", " (List.map (fun (field, value) ->
+                trans_iexpr s value) fields) ^ "}"
     | Field_access(loc, lhs, field) ->
         (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field
 
@@ -154,7 +163,7 @@ and declare_prerequisites s = function
 let declare_locals s proc_sym =
     List.iter (fun sym ->
         match sym.sym_kind with
-            | Temp ->
+            | Var|Temp ->
                 emit s (c_name_of_type s (unsome sym.sym_type)
                     ^ " " ^ c_name_of_var s sym ^ ";");
             | _ -> ()
