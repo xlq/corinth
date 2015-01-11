@@ -515,7 +515,10 @@ and trans_expr ts (target_type: ttype option) = function
         let lhs, lhs_type = trans_expr ts None lhs in
         let rhs, rhs_type = trans_expr ts None rhs in
         match_types ts loc lhs_type rhs_type;
-        (Binop(loc, lhs, op, rhs), lhs_type)
+        (Binop(loc, lhs, op, rhs),
+            match op with
+                | Add|Subtract|Multiply|Divide -> lhs_type
+                | LT|GT|LE|GE|EQ|NE -> Boolean_type)
 
 
 (*

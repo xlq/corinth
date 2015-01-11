@@ -33,7 +33,7 @@
 %left LPAREN
 %left STAR SLASH
 %left PLUS DASH
-%left LT GT LE GE 
+%left LT GT LE GE EQ NE
 
 %%
 
@@ -130,6 +130,12 @@ expr:
     | expr DASH expr { Binop(loc(), $1, Symtab.Subtract, $3) }
     | expr STAR expr { Binop(loc(), $1, Symtab.Multiply, $3) }
     | expr SLASH expr { Binop(loc(), $1, Symtab.Divide, $3) }
+    | expr LT expr { Binop(loc(), $1, Symtab.LT, $3) }
+    | expr GT expr { Binop(loc(), $1, Symtab.GT, $3) }
+    | expr LE expr { Binop(loc(), $1, Symtab.LE, $3) }
+    | expr GE expr { Binop(loc(), $1, Symtab.GE, $3) }
+    | expr EQ expr { Binop(loc(), $1, Symtab.EQ, $3) }
+    | expr NE expr { Binop(loc(), $1, Symtab.NE, $3) }
 
 expr_map:
     | expr { ([$1], []) }

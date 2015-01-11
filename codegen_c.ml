@@ -7,15 +7,18 @@ type state = {
     s_indent: int;
 }
 
-let new_state () =
-    {
-        s_output = stdout;
-        s_indent = 0;
-    }
-
 let emit s line = output_string s.s_output (times s.s_indent "    " ^ line ^ "\n")
 
 let indent s = {s with s_indent = s.s_indent + 1}
+
+let new_state () =
+    let s = {
+        s_output = stdout;
+        s_indent = 0;
+    } in
+    emit s "#include <stdbool.h>";
+    emit s "";
+    s
 
 let rec dotted_name_of_sym sym =
     if sym.sym_parent == sym then []
@@ -35,6 +38,7 @@ let c_name_of_type_sym s sym =
             "struct " ^ c_name_of_sym s sym
 
 let c_name_of_type s = function
+    | Boolean_type -> "bool"
     | Integer_type -> "int"
     | Named_type({sym_kind=Type_sym} as type_sym, _) -> c_name_of_type_sym s type_sym
     | Named_type({sym_kind=Type_param}, []) -> "void"
@@ -95,7 +99,13 @@ and trans_iexpr s = function
                 | Add -> "+"
                 | Subtract -> "-"
                 | Multiply -> "*"
-                | Divide -> "/")
+                | Divide -> "/"
+                | LT -> "<"
+                | GT -> ">"
+                | LE -> "<="
+                | GE -> ">="
+                | EQ -> "=="
+                | NE -> "!=")
             ^ " (" ^ trans_iexpr s rhs ^ ")"
     | Record_cons(loc, rec_sym, fields) ->
         "(" ^ c_name_of_type_sym s rec_sym ^ "){" ^
@@ -145,6 +155,7 @@ and declare_type s complete = function
     | No_type -> ()
     | Pointer_type(t) ->
         declare_type s false t
+    | Boolean_type -> ()
     | Integer_type -> ()
     | Named_type({sym_kind=Type_param}, []) -> ()
     | Named_type({sym_kind=Type_sym} as type_sym, _) -> declare s complete type_sym

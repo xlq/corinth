@@ -3,7 +3,7 @@ open Big_int
 type loc = Lexing.position
 type dotted_name = string list
 
-type binop = Add | Subtract | Multiply | Divide
+type binop = Add | Subtract | Multiply | Divide | LT | GT | LE | GE | EQ | NE
 
 type sym_kind =
     | Unit
@@ -38,6 +38,7 @@ and param_mode = Const_param | Var_param | Out_param
 
 and ttype =
     | No_type
+    | Boolean_type
     | Integer_type  (* This is temporary, for development *)
     | Named_type of symbol * (symbol * ttype) list
     | Pointer_type of ttype
