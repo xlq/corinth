@@ -88,7 +88,7 @@ and trans_iexpr s = function
         ^ String.concat ", " (List.map (fun (param, arg) ->
             (if is_param_by_value param then trans_iexpr s arg
             else "&(" ^ trans_iexpr s arg ^ ")")) args) ^ ")"
-    (*| Binop(loc, lhs, op, rhs) ->
+    | Binop(loc, lhs, op, rhs) ->
         "(" ^ trans_iexpr s lhs ^ ") "
             ^ (match op with
                 | Add -> "+"
@@ -96,8 +96,6 @@ and trans_iexpr s = function
                 | Multiply -> "*"
                 | Divide -> "/")
             ^ " (" ^ trans_iexpr s rhs ^ ")"
-    | Field_access(loc, lhs, field) -> begin
-        (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field*)
     | Record_cons(loc, rec_sym, fields) ->
         "(" ^ c_name_of_type_sym s rec_sym ^ "){" ^
             String.concat ", " (List.map (fun (field, value) ->

@@ -3,6 +3,8 @@ open Big_int
 type loc = Lexing.position
 type dotted_name = string list
 
+type binop = Add | Subtract | Multiply | Divide
+
 type sym_kind =
     | Unit
     | Var (* variable or field *)
@@ -53,6 +55,7 @@ and iexpr =
     | Apply of loc * iexpr * (symbol * iexpr) list
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
+    | Binop of loc * iexpr * binop * iexpr
 
 val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)

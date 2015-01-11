@@ -30,6 +30,9 @@
 %type <Parse_tree.unit_decl> unit_decl
 
 %right CARET
+%left LPAREN
+%left STAR SLASH
+%left PLUS DASH
 %left LT GT LE GE 
 
 %%
@@ -123,6 +126,10 @@ expr:
     | INTEGER { Int_literal(loc(), $1) }
     | expr LPAREN expr_map RPAREN { Apply(loc(), $1, $3) }
     | LBRACE expr_map RBRACE { Record_cons(loc(), $2) }
+    | expr PLUS expr { Binop(rhs_start_pos 2, $1, Symtab.Add, $3) }
+    | expr DASH expr { Binop(loc(), $1, Symtab.Subtract, $3) }
+    | expr STAR expr { Binop(loc(), $1, Symtab.Multiply, $3) }
+    | expr SLASH expr { Binop(loc(), $1, Symtab.Divide, $3) }
 
 expr_map:
     | expr { ([$1], []) }

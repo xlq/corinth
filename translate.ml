@@ -148,6 +148,30 @@ let rec coerce ts loc target_type why_target source_type =
                     ^ string_of_type target_type
                     ^ "' but got `" ^ string_of_type source_type ^ "'.")
 
+let rec match_types ts loc t1 t2 =
+    match t1, t2 with
+        | t1, t2 when t1 == t2 -> ()
+        | No_type, No_type -> ()
+        | Integer_type, Integer_type -> ()
+        | Pointer_type(t1), Pointer_type(t2) -> match_types ts loc t1 t2
+        | Named_type(s1, []), Named_type(s2, []) when s1 == s2 -> ()
+        | Named_type({sym_kind=Type_param; sym_type=Some t1}, []), t2
+        | t1, Named_type({sym_kind=Type_param; sym_type=Some t2}, []) ->
+            match_types ts loc t1 t2
+        | Named_type({sym_kind=Type_param; sym_type=None} as tp, []), t2 ->
+            unify ts tp t2
+        | t1, Named_type({sym_kind=Type_param; sym_type=None} as tp, []) ->
+            unify ts tp t1
+        (* Type mismatches *)
+        | No_type, _ | _, No_type
+        | Integer_type, _ | _, Integer_type
+        | Pointer_type _, _ | _, Pointer_type _
+        | Named_type _, Named_type _ ->
+            Errors.semantic_error loc
+                ("Incompatible types: `"
+                    ^ string_of_type t1 ^ "' and `"
+                    ^ string_of_type t2 ^ "'.")
+
 let match_args_to_params loc what params pos_args named_args =
     let remaining_params = ref params in
     let matched_params = ref [] in
@@ -197,7 +221,9 @@ let rec loc_of_iexpr = function
     | Int_literal(loc, _)
     | Apply(loc, _, _)
     | Record_cons(loc, _, _)
-    | Field_access(loc, _, _) -> loc
+    | Field_access(loc, _, _)
+    | Binop(loc, _, _, _)
+        -> loc
 
 let rec trans_unit ts = function
     | Parse_tree.Unit(loc, [name], decls) ->
@@ -484,6 +510,11 @@ and trans_expr ts (target_type: ttype option) = function
             ) (match_args_to_params loc "record fields"
                 (get_fields rec_sym) pos_fields named_fields)
          ), Named_type(rec_sym, []))
+    | Parse_tree.Binop(loc, lhs, op, rhs) ->
+        let lhs, lhs_type = trans_expr ts None lhs in
+        let rhs, rhs_type = trans_expr ts None rhs in
+        match_types ts loc lhs_type rhs_type;
+        (Binop(loc, lhs, op, rhs), lhs_type)
 
 
 (*

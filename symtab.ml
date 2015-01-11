@@ -4,6 +4,8 @@ open Misc
 type loc = Lexing.position
 type dotted_name = string list
 
+type binop = Add | Subtract | Multiply | Divide
+
 type sym_kind =
     | Unit
     | Var
@@ -54,6 +56,7 @@ and iexpr =
     | Apply of loc * iexpr * (symbol * iexpr) list
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
+    | Binop of loc * iexpr * binop * iexpr
 
 let dummy_loc = {
     Lexing.pos_fname = "<built-in>";

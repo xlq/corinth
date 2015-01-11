@@ -36,3 +36,4 @@ and expr =
     | Int_literal of loc * big_int
     | Apply of loc * expr * expr args
     | Record_cons of loc * expr args
+    | Binop of loc * expr * Symtab.binop * expr
