@@ -75,12 +75,13 @@ let rec trans_istmt s = function
 and trans_istmts s = List.iter (trans_istmt s)
 
 and trans_iexpr s = function
+    | Name(loc, ({sym_kind=Param} as sym)) ->
+        if is_param_by_value sym then
+            c_name_of_var s sym
+        else
+            "(*" ^ c_name_of_var s sym ^ ")"
     | Name(loc, sym) ->
-        begin match sym.sym_kind, sym.sym_param_mode with
-            | Param, (Var_param|Out_param) ->
-                "*" ^ c_name_of_var s sym
-            | _ -> c_name_of_var s sym
-        end
+        c_name_of_var s sym
     | Int_literal(loc, n) ->
         string_of_big_int n
     | Apply(loc, proc_e, args) ->
