@@ -179,6 +179,7 @@ let rec declare s complete sym =
             | {sym_kind=Proc} as proc_sym ->
                 emit s (func_prototype s proc_sym ^ ";");
                 proc_sym.sym_backend_translated <- 1
+            | {sym_kind=Var} -> ()
     end
 
 and declare_type s complete = function

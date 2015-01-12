@@ -424,6 +424,11 @@ and trans_stmt ts = function
         Errors.semantic_error
             (loc_of_expr e)
             "Statement expected but expression found."
+    | Parse_tree.Assign(loc, dest, src) ->
+        let dest, dest_type = trans_expr ts None dest in
+        let src, src_type = trans_expr ts (Some dest_type) src in
+        coerce ts loc dest_type "for assignment" src_type;
+        emit ts (Assign(loc, dest, src))
     | Parse_tree.Return(loc, Some e) ->
         begin match ts.ts_scope with
             | {sym_kind=Proc; sym_type=Some No_type} ->

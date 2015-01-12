@@ -129,6 +129,7 @@ decl_or_stmt:
     | stmt { $1 }
 stmt:
     | expr SEMICOLON { Expr $1 }
+    | expr ASSIGN expr SEMICOLON { Assign(loc(), $1, $3) }
     | RETURN expr SEMICOLON { Return(loc(), Some $2) }
     | RETURN SEMICOLON { Return(loc(), None) }
     | IF expr THEN proc_body else_parts END IF SEMICOLON {
@@ -150,6 +151,7 @@ expr:
     | INTEGER { Int_literal(loc(), $1) }
     | STRING { String_literal(loc(), $1) }
     | expr LPAREN expr_map RPAREN { Apply(loc(), $1, $3) }
+    | expr LPAREN RPAREN { Apply(loc(), $1, ([], [])) }
     | LBRACE expr_map RBRACE { Record_cons(loc(), $2) }
     | expr PLUS expr { Binop(rhs_start_pos 2, $1, Symtab.Add, $3) }
     | expr DASH expr { Binop(loc(), $1, Symtab.Subtract, $3) }

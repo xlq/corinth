@@ -33,6 +33,7 @@ and ttype =
 and stmt =
     | Decl of decl
     | Expr of expr
+    | Assign of loc * expr * expr
     | Return of loc * expr option
     | If_stmt of (loc * expr * stmt list) list * (loc * stmt list) option
     | While_stmt of loc * expr * stmt list
