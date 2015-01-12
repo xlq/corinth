@@ -27,6 +27,7 @@ type symbol = {
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
     mutable sym_dispatching: bool; (* Proc's ttype parameter is dispatching (declared "disp") *)
+    mutable sym_base_proc: symbol option; (* Base proc for overriding proc. *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: bool;
@@ -84,6 +85,7 @@ let new_root_sym () =
         sym_type = None;
         sym_locals = [];
         sym_dispatching = false;
+        sym_base_proc = None;
         sym_param_mode = Const_param;
         sym_code = None;
         sym_imported = false;
@@ -112,6 +114,7 @@ let create_sym parent loc name kind =
         sym_type = None;
         sym_locals = [];
         sym_dispatching = false;
+        sym_base_proc = None;
         sym_param_mode = Const_param;
         sym_code = None;
         sym_imported = false;
@@ -136,18 +139,25 @@ let rec get_fields sym =
 let get_params sym =
     List.filter (fun s -> s.sym_kind = Param) sym.sym_locals
 
-let rec string_of_type = function
+let rec string_of_type_int expand_tp = function
     | No_type -> "<no type>"
     | Boolean_type -> "bool"
     | Integer_type -> "int"
     | Char_type -> "char"
+    | Named_type({sym_kind=Type_param; sym_type=Some t}, []) when expand_tp -> string_of_type_int true t
     | Named_type(sym, []) -> sym.sym_name
     | Named_type(sym, args) ->
         sym.sym_name ^ "<" ^ String.concat ", "
             (List.map (fun (param, arg) ->
-                param.sym_name ^ "=" ^ string_of_type arg) args) ^ ">"
-    | Pointer_type t -> "^" ^ string_of_type t
+                param.sym_name ^ "=" ^ string_of_type_int expand_tp arg) args) ^ ">"
+    | Pointer_type t -> "^" ^ string_of_type_int expand_tp t
     | Proc_type _ -> "<proc type>"
+
+let string_of_type t =
+    let short = string_of_type_int false t in
+    let long = string_of_type_int true t in
+    if short = long then short
+    else short ^ " (" ^ long ^ ")"
 
 let rec sym_is_grandchild parent sym =
     if parent == sym then true
@@ -160,3 +170,9 @@ let full_name sym =
             if s.sym_parent == s then r
             else follow (s.sym_name::r) s.sym_parent
          in follow [] sym)
+
+let is_dispatching sym =
+    assert (sym.sym_kind = Proc);
+    List.exists (function
+        | {sym_kind=Type_param; sym_dispatching=true} -> true
+        | _ -> false) sym.sym_locals

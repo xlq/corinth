@@ -25,7 +25,8 @@ type symbol = {
        Type_param -> sym_type is what the type parameter is currently unified with. *)
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
-    mutable sym_dispatching: bool; (* Parameter is dispatching (declared "disp") *)
+    mutable sym_dispatching: bool; (* Proc's ttype parameter is dispatching (declared "disp") *)
+    mutable sym_base_proc: symbol option; (* Base proc for overriding proc. *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: bool;
@@ -76,3 +77,4 @@ val get_params : symbol -> symbol list (* get proc parameters *)
 val string_of_type : ttype -> string
 val sym_is_grandchild : symbol -> symbol -> bool
 val full_name : symbol -> string
+val is_dispatching : symbol -> bool

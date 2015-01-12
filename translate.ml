@@ -59,6 +59,12 @@ let name_for_error ts sym =
     if (sym_is_grandchild ts.ts_scope sym) || (ts.ts_scope == sym) then sym.sym_name
     else full_name sym
 
+let wrong_sym_kind ts loc bad_sym expected =
+    Errors.semantic_error loc
+        (String.capitalize expected ^ " expected but "
+            ^ describe_sym bad_sym ^ " `" ^ name_for_error ts bad_sym ^ "' found.");
+    raise Errors.Compile_error
+
 let check_for_duplicate_definition scope loc name =
     List.iter (fun sym ->
         if sym.sym_name = name then begin
@@ -86,6 +92,23 @@ let search_scopes_or_fail ts loc name =
     match search_scopes ts name with
         | Some sym -> sym
         | None -> undefined_symbol ts loc name
+
+let find_dotted_name ts loc name =
+    let head::tail = name in
+    List.fold_left (fun sym name ->
+        if sym.sym_kind <> Unit then begin
+            Errors.semantic_error loc "This doesn't make sense."; (* TODO: Proper error message, lol *)
+            raise Compile_error
+        end else match maybe_find (fun child -> child.sym_name = name) sym.sym_locals with
+            | Some child -> child
+            | None ->
+                Errors.semantic_error loc
+                    (String.capitalize (describe_sym sym)
+                     ^ " `" ^ name_for_error ts sym ^ "' has nothing named `"
+                     ^ name ^ "'.");
+                raise Compile_error
+    ) (search_scopes_or_fail ts loc head) tail
+
 
 let rec unwind_unifs stop_at = function
     | unifs when unifs == stop_at -> ()
@@ -307,6 +330,21 @@ let rec trans_unit ts = function
 
 and trans_decls ts = List.iter (trans_decl ts)
 
+and trans_params ts proc_sym params return_type =
+    let ts = {ts with ts_scope = proc_sym} in
+    List.iter (fun (loc, name, ttype, mode) ->
+        let ttype' = match ttype with
+            | None -> None
+            | Some t -> Some (trans_type ts t) in
+        check_for_duplicate_definition proc_sym loc name;
+        let param_sym = create_sym proc_sym loc name Param in
+        param_sym.sym_type <- ttype';
+        param_sym.sym_param_mode <- mode
+    ) params;
+    proc_sym.sym_type <- (match return_type with
+        | Some rt -> Some (trans_type ts rt)
+        | None -> Some No_type)
+
 and trans_decl ts = function
     (*
     (* Variable definition *)
@@ -318,40 +356,90 @@ and trans_decl ts = function
         ) names
     *)
     (* Procedure definition *)
-    | (Parse_tree.Proc_decl(loc, name, type_params, params, return_type, _) as decl)
-    | (Parse_tree.Proc_import(loc, name, type_params, params, return_type) as decl) -> begin
+    | Parse_tree.Proc_decl(loc, name, type_params, params, return_type, maybe_body) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
-        (* Type parameters *)
-        let type_params = trans_type_params {ts with ts_scope = proc_sym} type_params in
-        let dispatching_type_param = List.fold_left (fun disp_tp tp ->
-            if not tp.sym_dispatching then disp_tp else
-            match disp_tp with
-                | None -> Some tp
-                | Some tp' ->
-                    Errors.semantic_error (unsome tp'.sym_defined)
-                        ("Only one type parameter can be marked as dispatching.");
-                    Some tp'
-        ) None type_params in
-        (* Parameters *)
-        List.iter (fun (loc, name, ttype, mode) ->
-            let ttype' = match ttype with
-                | None -> None
-                | Some t -> Some (trans_type {ts with ts_scope = proc_sym} t) in
-            check_for_duplicate_definition proc_sym loc name;
-            let param_sym = create_sym proc_sym loc name Param in
-            param_sym.sym_type <- ttype';
-            param_sym.sym_param_mode <- mode
-        ) params;
-        (* Return type *)
-        proc_sym.sym_type <- (match return_type with
-            | Some rt -> Some (trans_type {ts with ts_scope = proc_sym} rt)
-            | None -> Some No_type);
-        match decl with
-            | Parse_tree.Proc_decl(_, _, _, _, _, Some body) -> todo ts (Todo_proc(body, proc_sym))
-            | Parse_tree.Proc_decl(_, _, _, _, _, None) -> proc_sym.sym_abstract <- true
-            | Parse_tree.Proc_import(_, _, _, _, _) -> proc_sym.sym_imported <- true
-    end
+        let disp_tp = trans_type_params {ts with ts_scope = proc_sym} type_params true in
+        trans_params ts proc_sym params return_type;
+        begin match maybe_body with
+            | Some body -> todo ts (Todo_proc(body, proc_sym))
+            | None ->
+                begin match disp_tp with
+                    | Some _ -> ()
+                    | None ->
+                        Errors.semantic_error loc
+                            ("Non-dispatching procedure cannot be abstract.")
+                end;
+                proc_sym.sym_abstract <- true
+        end
+    | Parse_tree.Proc_import(loc, name, type_params, params, return_type) ->
+        check_for_duplicate_definition ts.ts_scope loc name;
+        let proc_sym = create_sym ts.ts_scope loc name Proc in
+        let disp_tp = trans_type_params {ts with ts_scope = proc_sym} type_params true in
+        trans_params ts proc_sym params return_type;
+        proc_sym.sym_imported <- true
+    | Parse_tree.Proc_override(loc, name, type_params, params, return_type, body) ->
+        begin match find_dotted_name ts loc name with
+            | {sym_kind=Proc} as base_proc ->
+                if not (is_dispatching base_proc) then
+                    Errors.semantic_error loc
+                        ("Cannot override non-dispatching procedure `"
+                            ^ name_for_error ts base_proc ^ "'.");
+                let proc_sym = create_sym ts.ts_scope loc "" Proc in
+                proc_sym.sym_base_proc <- Some base_proc;
+                begin match trans_type_params {ts with ts_scope = proc_sym} type_params true with
+                    | None -> ()
+                    | Some _ ->
+                        Errors.semantic_error loc
+                            ("Redispatching is not implemented.")
+                end;
+                trans_params ts proc_sym params return_type;
+                (* Check that the overriding procedure is type-compatible with the base procedure. *)
+                let base_params = get_params base_proc in
+                let ovrd_params = get_params proc_sym in
+                if List.length base_params <> List.length ovrd_params then
+                    Errors.semantic_error loc
+                        ("Overriding procedure has "
+                            ^ (if List.length base_params < List.length ovrd_params then "more" else "fewer")
+                            ^ " parameters than procedure `"
+                            ^ name_for_error ts base_proc ^ "'.")
+                else exi_quant_param ts base_proc (fun ts ->
+                    (* Parameter types must be an instance of the base's parameter types. *)
+                    List.iter2 (fun base_param ovrd_param ->
+                        if base_param.sym_name <> ovrd_param.sym_name then
+                            Errors.semantic_error (unsome ovrd_param.sym_defined)
+                                ("Parameter name mismatch: `"
+                                    ^ ovrd_param.sym_name ^ "' should be called `"
+                                    ^ base_param.sym_name ^ "'.") else
+                        (* XXX: Probably need more strictness than coerce. *)
+                        coerce ts (unsome ovrd_param.sym_defined)
+                            (unsome base_param.sym_type) "for overriding parameter"
+                            (unsome ovrd_param.sym_type)
+                    ) base_params ovrd_params;
+                    (* Return type must also be an instance of the base's return type. *)
+                    (* XXX: Probably need more strictness than coerce. *)
+                    coerce ts loc (unsome proc_sym.sym_type) "overriding return type"
+                        (unsome base_proc.sym_type);
+                    List.iter (function
+                        | {sym_kind=Type_param; sym_dispatching=false; sym_type=Some t; sym_name=name} ->
+                            Errors.semantic_error loc
+                                ("Overriding procedure specialises non-dispatching type parameter `"
+                                    ^ name ^ "' to `" ^ string_of_type t ^ "'.")
+                            (* XXX: These error messages are incomprehensible. :(
+                               Maybe point out which parameter should have the correct type. *)
+                        | {sym_kind=Type_param; sym_dispatching=true; sym_type=None; sym_name=name} ->
+                            Errors.semantic_error loc
+                                ("Overriding procedure doesn't specialise type parameter `"
+                                    ^ name ^ "'.")
+                        | {sym_kind=Type_param; sym_dispatching=true; sym_type=Some t; sym_name=name} ->
+                            prerr_endline ("Procedure `" ^ name_for_error ts base_proc
+                                ^ "' specialised for type `" ^ string_of_type t ^ "'.")
+                        | _ -> ()
+                    ) (get_type_params base_proc)
+                )
+            | bad_sym -> wrong_sym_kind ts loc bad_sym "dispatching procedure"
+        end
+
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Type_alias(other)) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let other = trans_type ts other in
@@ -361,12 +449,7 @@ and trans_decl ts = function
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Record_type(fields)) as decl ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let type_sym = create_sym ts.ts_scope loc name Type_sym in
-        let type_params = trans_type_params {ts with ts_scope = type_sym} type_params in
-        List.iter (fun tparam ->
-            if tparam.sym_dispatching then
-                Errors.semantic_error (unsome tparam.sym_defined)
-                    ("`disp' only makes sense for procedures, not for types.")
-        ) type_params;
+        let None = trans_type_params {ts with ts_scope = type_sym} type_params false in
         type_sym.sym_type <- Some (Record_type(None)); (* TODO: base record *)
         todo ts (Todo_type(decl, type_sym))
     | Parse_tree.Var_decl(loc, name, maybe_type, maybe_init) ->
@@ -406,13 +489,25 @@ and trans_decl ts = function
         const_sym.sym_type <- Some expr_type;
         const_sym.sym_const <- Some expr
 
-and trans_type_params ts type_params =
-    List.map (fun (loc, name, dispatching) ->
+and trans_type_params ts type_params can_dispatch =
+    let disp_tp = ref None in
+    List.iter (fun (loc, name, dispatching) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let new_param = create_sym ts.ts_scope loc name Type_param in
-        new_param.sym_dispatching <- dispatching;
-        new_param
-    ) type_params
+        match can_dispatch, dispatching, !disp_tp with
+            | false, false, _ -> ()
+            | false, true, _ ->
+                Errors.semantic_error loc
+                    ("`disp' only makes sense for procedures, not for types.")
+            | true, false, _ -> ()
+            | true, true, None ->
+                new_param.sym_dispatching <- true;
+                disp_tp := Some new_param
+            | true, true, Some tp ->
+                Errors.semantic_error loc
+                    ("Only one type parameter can be marked as dispatching.")
+    ) type_params;
+    !disp_tp
 
 and trans_type ts = function
     | Parse_tree.Integer_type -> Integer_type
@@ -424,11 +519,7 @@ and trans_type ts = function
                 Named_type(typ, [])
             | {sym_kind=Type_param} as typ_p ->
                 Named_type(typ_p, [])
-            | bad_sym ->
-                Errors.semantic_error loc
-                    ("Type expected but " ^ describe_sym bad_sym
-                     ^ " `" ^ name_for_error ts bad_sym ^ "' found.");
-                raise Errors.Compile_error
+            | bad_sym -> wrong_sym_kind ts loc bad_sym "type"
         end
     | Parse_tree.Applied_type(loc, ttype, (pos_args, named_args)) ->
         begin match trans_type ts ttype with

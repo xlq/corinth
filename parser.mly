@@ -4,6 +4,7 @@
     open Parsing
     open Parse_tree
     open Errors
+    open Misc
 
     let loc () = symbol_start_pos ()
     let string_of_dotted_name = String.concat "."
@@ -91,6 +92,9 @@ decl:
           Proc_decl(loc(), $2, $3, $5, $7, Some $9) }
     | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS ABSTRACT SEMICOLON
         { Proc_decl(loc(), $2, $3, $5, $7, None) }
+    | OVERRIDING PROC dotted_name opt_type_params LPAREN params RPAREN opt_type IS proc_body END IDENT SEMICOLON
+        { check_end (rhs_start_pos 3, last $3) (rhs_start_pos 12, $12);
+          Proc_override(loc(), $3, $4, $6, $8, $10) }
     | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS IMPORTED SEMICOLON
         { Proc_import(loc(), $2, $3, $5, $7) }
     | CONST IDENT ASSIGN expr SEMICOLON

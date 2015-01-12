@@ -17,6 +17,7 @@ and decl =
     | Proc_decl of loc * string * type_param list * param list * ttype option
             * stmt list option (* None if procedure is abstract *)
     | Proc_import of loc * string * type_param list * param list * ttype option
+    | Proc_override of loc * dotted_name * type_param list * param list * ttype option * stmt list
     | Const_decl of loc * string * expr
 
 and type_defn =
