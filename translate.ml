@@ -98,6 +98,16 @@ let unify ts v t =
     v.sym_type <- Some t;
     prerr_endline ("Unifying " ^ full_name v ^ " -> " ^ string_of_type t)
 
+(* Substitute type parameters for type arguments. *)
+let rec subst_tparams tparams = function
+    | No_type -> No_type
+    | Boolean_type -> Boolean_type
+    | Integer_type -> Integer_type
+    | Char_type -> Char_type
+    | Named_type({sym_kind=Type_param} as param, []) ->
+        snd (List.find (fun (param', arg') -> param == param') tparams)
+    | Pointer_type t -> Pointer_type (subst_tparams tparams t)
+
 (* Return the actual type (follow Named_type) *)
 let rec actual_type = function
     | (Integer_type | Pointer_type _ | Record_type _) as t -> t
@@ -517,10 +527,10 @@ and trans_expr ts (target_type: ttype option) = function
                     | Right(expr, tp, lvalue) ->
                         (* Look field up in record type. *)
                         begin match tp with
-                            | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, _) ->
+                            | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, tparams) ->
                                 begin match maybe_find (fun s -> s.sym_name = part) (get_fields type_sym) with
                                     | Some field ->
-                                        Right(Field_access(loc, expr, field), unsome field.sym_type, lvalue)
+                                        Right(Field_access(loc, expr, field), subst_tparams tparams (unsome field.sym_type), lvalue)
                                     | None ->
                                         Errors.semantic_error loc
                                             ("Type `" ^ name_for_error ts type_sym ^ "' has no field named `" ^ part ^ "'.");
@@ -629,7 +639,7 @@ let finish_trans ts =
     List.iter (function
         | Todo_type(Parse_tree.Type_decl(loc, name, type_params,
           Parse_tree.Record_type(fields)), type_sym) ->
-            let ts = {ts with ts_scope = type_sym.sym_parent} in
+            let ts = {ts with ts_scope = type_sym} in
             List.iter (fun (loc, name, ttype) ->
                 let ttype' = trans_type ts ttype in
                 match name with
