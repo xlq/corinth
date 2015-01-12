@@ -138,6 +138,10 @@ let rec coerce ts loc target_type why_target source_type =
                     ("for parameter `" ^ param1.sym_name ^ "' of type `"
                         ^ name_for_error ts s1 ^ "'") arg2
             ) params1 params2
+        (* Type aliases. *)
+        | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
+        | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) ->
+            coerce ts loc t1 why_target t2
         (* Type mismatches. *)
         | No_type, _ | _, No_type
         | Integer_type, _ | _, Integer_type
@@ -162,6 +166,10 @@ let rec match_types ts loc t1 t2 =
             unify ts tp t2
         | t1, Named_type({sym_kind=Type_param; sym_type=None} as tp, []) ->
             unify ts tp t1
+        (* Type aliases. *)
+        | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
+        | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) ->
+            match_types ts loc t1 t2
         (* Type mismatches *)
         | No_type, _ | _, No_type
         | Integer_type, _ | _, Integer_type
@@ -273,6 +281,10 @@ and trans_decl ts = function
             | None -> Some No_type);
         todo ts (Todo_proc(body, proc_sym))
     end
+    | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Type_alias(other)) ->
+        let other = trans_type ts other in
+        let type_sym = create_sym ts.ts_scope loc name Type_sym in
+        type_sym.sym_type <- Some other
     (* Record type declaration *)
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Record_type(fields)) ->
         let type_sym = create_sym ts.ts_scope loc name Type_sym in

@@ -32,12 +32,14 @@ let c_name_of_local s sym = String.lowercase sym.sym_name
 let c_name_of_sym s sym =
     c_name_of_dotted_name s (dotted_name_of_sym sym)
 
-let c_name_of_type_sym s sym =
+let rec c_name_of_type_sym s sym =
     match sym with
         | {sym_kind=Type_sym; sym_type=Some (Record_type _)} ->
             "struct " ^ c_name_of_sym s sym
+        | {sym_kind=Type_sym; sym_type=Some t} ->
+            c_name_of_type s t
 
-let c_name_of_type s = function
+and c_name_of_type s = function
     | Boolean_type -> "bool"
     | Integer_type -> "int"
     | Named_type({sym_kind=Type_sym} as type_sym, _) -> c_name_of_type_sym s type_sym
@@ -164,6 +166,8 @@ let rec declare s complete sym =
                 end else begin
                     emit s (c_name_of_type_sym s type_sym ^ ";") (* "struct foo;" *)
                 end
+            | {sym_kind=Type_sym; sym_type=Some t} ->
+                declare_type s true t
             | {sym_kind=Proc} as proc_sym ->
                 emit s (func_prototype s proc_sym ^ ";")
     end
@@ -184,6 +188,8 @@ and declare_prerequisites s = function
             | {sym_kind=Var} as field ->
                 declare_type s true (unsome field.sym_type)
         ) type_sym.sym_locals
+    | {sym_kind=Type_sym; sym_type=Some t} ->
+        declare_type s true t
     | {sym_kind=Var|Param} as var_sym ->
         declare_type s true (unsome var_sym.sym_type)
     | {sym_kind=Type_param} -> ()
