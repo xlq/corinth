@@ -127,17 +127,19 @@ let rec same_type t1 t2 =
         | Integer_type, _ | _, Integer_type
         | Pointer_type _, _ | _, Pointer_type _ -> false
 
-let rec coerce ts loc target_type why_target source_type =
+exception Type_mismatch
+
+let rec coerce_int ts loc target_type why_target source_type =
     match target_type, source_type with
         | t1, t2 when t1 == t2 -> () (* short-cut if the types are exactly the same *)
         | No_type, No_type -> ()
         | Integer_type, Integer_type -> ()
-        | Pointer_type(t1), Pointer_type(t2) -> coerce ts loc t1 why_target t2
+        | Pointer_type(t1), Pointer_type(t2) -> coerce_int ts loc t1 why_target t2
         | Named_type(s1, []), Named_type(s2, []) when s1 == s2 -> () (* same symbol *)
         | Named_type({sym_kind=Type_param; sym_type=Some t1}, []), t2
         | t2, Named_type({sym_kind=Type_param; sym_type=Some t1}, []) ->
             (* Follow type parameter unification. *)
-            coerce ts loc t1 why_target t2
+            coerce_int ts loc t1 why_target t2
         | Named_type({sym_kind=Type_param; sym_type=None} as tp, []), t2 ->
             (* Target type parameter isn't unified, so it could be anything.
                Now we know it must be t2. *)
@@ -145,34 +147,39 @@ let rec coerce ts loc target_type why_target source_type =
         | Named_type(s1, params1), Named_type(s2, params2) when s1 == s2 ->
             List.iter2 (fun (param1, arg1) (param2, arg2) ->
                 assert (param1 == param2);
-                coerce ts loc arg1
+                coerce_int ts loc arg1
                     ("for parameter `" ^ param1.sym_name ^ "' of type `"
                         ^ name_for_error ts s1 ^ "'") arg2
             ) params1 params2
         (* Type aliases. *)
         | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
         | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) ->
-            coerce ts loc t1 why_target t2
+            coerce_int ts loc t1 why_target t2
         (* Type mismatches. *)
         | No_type, _ | _, No_type
         | Integer_type, _ | _, Integer_type
         | Pointer_type _, _ | _, Pointer_type _
         | Named_type _, Named_type _ ->
-            Errors.semantic_error loc
-                ("Type mismatch " ^ why_target ^ ": expected `"
-                    ^ string_of_type target_type
-                    ^ "' but got `" ^ string_of_type source_type ^ "'.")
+            raise Type_mismatch
 
-let rec match_types ts loc t1 t2 =
+let coerce ts loc target_type why_target source_type =
+    try coerce_int ts loc target_type why_target source_type
+    with Type_mismatch ->
+        Errors.semantic_error loc
+            ("Type mismatch " ^ why_target ^ ": expected `"
+                ^ string_of_type target_type
+                ^ "' but got `" ^ string_of_type source_type ^ "'.")
+
+let rec match_types_int ts loc t1 t2 =
     match t1, t2 with
         | t1, t2 when t1 == t2 -> ()
         | No_type, No_type -> ()
         | Integer_type, Integer_type -> ()
-        | Pointer_type(t1), Pointer_type(t2) -> match_types ts loc t1 t2
+        | Pointer_type(t1), Pointer_type(t2) -> match_types_int ts loc t1 t2
         | Named_type(s1, []), Named_type(s2, []) when s1 == s2 -> ()
         | Named_type({sym_kind=Type_param; sym_type=Some t1}, []), t2
         | t1, Named_type({sym_kind=Type_param; sym_type=Some t2}, []) ->
-            match_types ts loc t1 t2
+            match_types_int ts loc t1 t2
         | Named_type({sym_kind=Type_param; sym_type=None} as tp, []), t2 ->
             unify ts tp t2
         | t1, Named_type({sym_kind=Type_param; sym_type=None} as tp, []) ->
@@ -180,16 +187,21 @@ let rec match_types ts loc t1 t2 =
         (* Type aliases. *)
         | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
         | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) ->
-            match_types ts loc t1 t2
+            match_types_int ts loc t1 t2
         (* Type mismatches *)
         | No_type, _ | _, No_type
         | Integer_type, _ | _, Integer_type
         | Pointer_type _, _ | _, Pointer_type _
         | Named_type _, Named_type _ ->
-            Errors.semantic_error loc
-                ("Incompatible types: `"
-                    ^ string_of_type t1 ^ "' and `"
-                    ^ string_of_type t2 ^ "'.")
+            raise Type_mismatch
+
+let match_types ts loc t1 t2 =
+    try match_types_int ts loc t1 t2
+    with Type_mismatch ->
+        Errors.semantic_error loc
+            ("Incompatible types: `"
+                ^ string_of_type t1 ^ "' and `"
+                ^ string_of_type t2 ^ "'.")
 
 let match_args_to_params loc what params pos_args named_args =
     let remaining_params = ref (enumerate params) in
