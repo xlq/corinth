@@ -17,6 +17,7 @@
 %token <string> IDENT
 %token <string> STRING
 %token <Big_int.big_int> INTEGER
+%token <char> CHARLIT
 
 /* Keywords */
 %token ABSTRACT CONST DISP ELSE ELSIF END IF IMPORTED IS LOOP OVERRIDE PROC RETURN THEN
@@ -31,11 +32,11 @@
 %start unit_decl
 %type <Parse_tree.unit_decl> unit_decl
 
-%right CARET
-%left LPAREN
-%left STAR SLASH
-%left PLUS DASH
 %left LT GT LE GE EQ NE
+%left PLUS DASH
+%left STAR SLASH
+%left LPAREN
+%right CARET
 
 %%
 
@@ -150,6 +151,7 @@ expr:
     | dotted_name { Name(loc(), $1) }
     | INTEGER { Int_literal(loc(), $1) }
     | STRING { String_literal(loc(), $1) }
+    | CHARLIT { Char_literal(loc(), $1) }
     | expr LPAREN expr_map RPAREN { Apply(loc(), $1, $3) }
     | expr LPAREN RPAREN { Apply(loc(), $1, ([], [])) }
     | LBRACE expr_map RBRACE { Record_cons(loc(), $2) }

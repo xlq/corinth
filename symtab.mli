@@ -59,6 +59,7 @@ and iexpr =
     | Name of loc * symbol
     | Int_literal of loc * big_int
     | String_literal of loc * string
+    | Char_literal of loc * char
     | Apply of loc * iexpr * (symbol * iexpr) list
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol

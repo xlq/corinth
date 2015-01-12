@@ -60,6 +60,8 @@ let c_name_of_var s sym =
         | Param -> c_name_of_local s sym
 
 let rec is_scalar = function
+    | Boolean_type -> true
+    | Char_type -> true
     | Integer_type -> true
     | Record_type _ -> false
     | Named_type({sym_kind=Type_sym; sym_type=Some t}, _) -> is_scalar t
@@ -113,6 +115,8 @@ and trans_iexpr s = function
         string_of_big_int n
     | String_literal(loc, s) ->
         "\"" ^ s ^ "\""
+    | Char_literal(loc, s) ->
+        "'" ^ String.make 1 s ^ "'"
     | Apply(loc, proc_e, args) ->
         trans_iexpr s proc_e ^ "("
         ^ String.concat ", " (List.map (fun (param, arg) ->
@@ -179,7 +183,7 @@ let rec declare s complete sym =
             | {sym_kind=Proc} as proc_sym ->
                 emit s (func_prototype s proc_sym ^ ";");
                 proc_sym.sym_backend_translated <- 1
-            | {sym_kind=Var} -> ()
+            | {sym_kind=Var|Param} -> ()
     end
 
 and declare_type s complete = function
@@ -236,6 +240,7 @@ and declare_prereq_expr s = function
     | Name(loc, sym) -> declare s false sym
     | Int_literal _ -> ()
     | String_literal _ -> ()
+    | Char_literal _ -> ()
     | Apply(loc, f, args) ->
         declare_prereq_expr s f;
         List.iter (fun (param,arg) ->

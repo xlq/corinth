@@ -60,6 +60,7 @@ and iexpr =
     | Name of loc * symbol
     | Int_literal of loc * big_int
     | String_literal of loc * string
+    | Char_literal of loc * char
     | Apply of loc * iexpr * (symbol * iexpr) list
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
@@ -132,14 +133,17 @@ let get_params sym =
     List.filter (fun s -> s.sym_kind = Param) sym.sym_locals
 
 let rec string_of_type = function
+    | No_type -> "<no type>"
     | Boolean_type -> "bool"
     | Integer_type -> "int"
+    | Char_type -> "char"
     | Named_type(sym, []) -> sym.sym_name
     | Named_type(sym, args) ->
         sym.sym_name ^ "<" ^ String.concat ", "
             (List.map (fun (param, arg) ->
                 param.sym_name ^ " => " ^ string_of_type arg) args) ^ ">"
     | Pointer_type t -> "^" ^ string_of_type t
+    | Proc_type _ -> "<proc type>"
 
 let rec sym_is_grandchild parent sym =
     if parent == sym then true
