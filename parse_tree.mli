@@ -20,7 +20,7 @@ and type_defn =
     | Type_alias of ttype
     | Record_type of (loc * string option * ttype) list
 
-and param = loc * string * ttype option * bool
+and param = loc * string * ttype option * Symtab.param_mode * bool
 
 and ttype =
     | Boolean_type
@@ -42,7 +42,7 @@ and expr =
     | Name of loc * dotted_name
     | Int_literal of loc * big_int
     | String_literal of loc * string
-    | Char_literal of loc * char
+    | Char_literal of loc * string
     | Apply of loc * expr * expr args
     | Record_cons of loc * expr args
     | Binop of loc * expr * Symtab.binop * expr

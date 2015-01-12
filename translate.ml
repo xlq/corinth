@@ -273,14 +273,14 @@ and trans_decl ts = function
         check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
         trans_type_params {ts with ts_scope = proc_sym} type_params;
-        List.iter (fun (loc, name, ttype, disp) ->
+        List.iter (fun (loc, name, ttype, mode, disp) ->
             let ttype' = match ttype with
                 | None -> None
                 | Some t -> Some (trans_type {ts with ts_scope = proc_sym} t) in
             check_for_duplicate_definition proc_sym loc name;
             let param_sym = create_sym proc_sym loc name Param in
             param_sym.sym_type <- ttype';
-            param_sym.sym_param_mode <- Const_param (* TODO *)
+            param_sym.sym_param_mode <- mode
         ) params;
         proc_sym.sym_type <- (match return_type with
             | Some rt -> Some (trans_type {ts with ts_scope = proc_sym} rt)
@@ -291,14 +291,14 @@ and trans_decl ts = function
         check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
         trans_type_params {ts with ts_scope = proc_sym} type_params;
-        List.iter (fun (loc, name, ttype, disp) ->
+        List.iter (fun (loc, name, ttype, mode, disp) ->
             let ttype' = match ttype with
                 | None -> None
                 | Some t -> Some (trans_type {ts with ts_scope = proc_sym} t) in
             check_for_duplicate_definition proc_sym loc name;
             let param_sym = create_sym proc_sym loc name Param in
             param_sym.sym_type <- ttype';
-            param_sym.sym_param_mode <- Const_param (* TODO *)
+            param_sym.sym_param_mode <- mode
         ) params;
         proc_sym.sym_type <- (match return_type with
             | Some rt -> Some (trans_type {ts with ts_scope = proc_sym} rt)
@@ -328,7 +328,7 @@ and trans_decl ts = function
                 begin match maybe_init with
                     | Some init ->
                         (* Initial value must be of correct type. *)
-                        let init, init_type = trans_expr ts (Some specified_type) init in
+                        let init, init_type, _ = trans_expr ts (Some specified_type) init in
                         coerce ts loc specified_type
                             ("for initialisation of variable `" ^ name ^ "'")
                             init_type;
@@ -339,7 +339,7 @@ and trans_decl ts = function
                 (* No type is specified. Type is inferred. *)
                 begin match maybe_init with
                     | Some init ->
-                        let init, init_type = trans_expr ts None init in
+                        let init, init_type, _ = trans_expr ts None init in
                         var_sym.sym_type <- Some init_type;
                         emit ts (Assign(loc, Name(loc, var_sym), init))
                     | None ->
@@ -350,7 +350,7 @@ and trans_decl ts = function
     | Parse_tree.Const_decl(loc, name, expr) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let const_sym = create_sym ts.ts_scope loc name Const in
-        let expr, expr_type = trans_expr ts None expr in
+        let expr, expr_type, _ = trans_expr ts None expr in
         const_sym.sym_type <- Some expr_type;
         const_sym.sym_const <- Some expr
 
@@ -413,7 +413,7 @@ and trans_stmt ts = function
         emit ts (Assignment(loc, lhs', rhs'))*)
     | Parse_tree.Decl decl -> trans_decl ts decl
     | Parse_tree.Expr((Parse_tree.Apply _) as e) ->
-        let call, tcall = trans_expr ts None e in
+        let call, tcall, _ = trans_expr ts None e in
         begin match call, tcall with
             | Apply(loc, proc, args), No_type ->
                 emit ts (Call(loc, proc, args))
@@ -427,8 +427,12 @@ and trans_stmt ts = function
             (loc_of_expr e)
             "Statement expected but expression found."
     | Parse_tree.Assign(loc, dest, src) ->
-        let dest, dest_type = trans_expr ts None dest in
-        let src, src_type = trans_expr ts (Some dest_type) src in
+        let dest, dest_type, lvalue = trans_expr ts None dest in
+        if not lvalue then begin
+            Errors.semantic_error loc ("Cannot assign to this expression.");
+            raise Compile_error
+        end;
+        let src, src_type, _ = trans_expr ts (Some dest_type) src in
         coerce ts loc dest_type "for assignment" src_type;
         emit ts (Assign(loc, dest, src))
     | Parse_tree.Return(loc, Some e) ->
@@ -438,7 +442,7 @@ and trans_stmt ts = function
                     ("Procedure `" ^ name_for_error ts ts.ts_scope
                      ^ "' has no return type, so cannot return a value.")
             | {sym_kind=Proc; sym_type=Some t} ->
-                let e, e_type = trans_expr ts (Some t) e in
+                let e, e_type, _ = trans_expr ts (Some t) e in
                 coerce ts (loc_of_iexpr e) t ("for returned value") e_type;
                 emit ts (Return(loc, Some e))
             | _ -> assert false
@@ -456,7 +460,7 @@ and trans_stmt ts = function
     | Parse_tree.If_stmt(parts, else_part) ->
         emit ts (If_stmt(
             List.map (fun (loc, condition, body) ->
-                let condition, condition_type = trans_expr ts
+                let condition, condition_type, _ = trans_expr ts
                     (Some Boolean_type) condition in
                 coerce ts loc Boolean_type "for condition" condition_type;
                 let body' = ref [] in
@@ -471,28 +475,31 @@ and trans_stmt ts = function
                     Some (loc, !body')
         ))
     | Parse_tree.While_stmt(loc, cond, body) ->
-        let cond, cond_type = trans_expr ts (Some Boolean_type) cond in
+        let cond, cond_type, _ = trans_expr ts (Some Boolean_type) cond in
         coerce ts loc Boolean_type "for condition" cond_type;
         let body' = ref [] in
         trans_stmts {ts with ts_block = Some body'} body;
         emit ts (While_stmt(loc, cond, !body'))
 
-(* Translate expression and return (iexpr * ttype) pair.
+(* Translate expression and return (iexpr * ttype * bool) tuple.
    target_type is the type of the expression's context, if known.
    This is necessary when the type of the expression cannot be determined
    from the expression alone (e.g. var x: record_type := {1, 2}).
    The type of the result of trans_expr IS NOT checked against target_type!
-   The types may be incompatible - the caller must check/coerce. *)
+   The types may be incompatible - the caller must check/coerce.
+   Third value is true iff expression is an l-value. *)
 
 and trans_expr ts (target_type: ttype option) = function
     | Parse_tree.Name(loc, name) ->
         let trans_sym sym =
-            match sym.sym_kind with
-                | Unit -> Left(sym)
-                | Var|Const|Param ->
-                    Right(Name(loc, sym), unsome sym.sym_type)
-                | Proc ->
-                    Right (Name(loc, sym), Proc_type (sym))
+            match sym with
+                | {sym_kind=Unit} -> Left(sym)
+                | {sym_kind=Var} | {sym_kind=Param; sym_param_mode=Var_param|Out_param} ->
+                    Right(Name(loc, sym), unsome sym.sym_type, true)
+                | {sym_kind=Param; sym_param_mode=Const_param} | {sym_kind=Const} ->
+                    Right(Name(loc, sym), unsome sym.sym_type, false)
+                | {sym_kind=Proc} ->
+                    Right(Name(loc, sym), Proc_type (sym), false)
         in
         let rec trans_dotted_name = function
             | [base] -> trans_sym (search_scopes_or_fail ts loc base)
@@ -507,13 +514,13 @@ and trans_expr ts (target_type: ttype option) = function
                                     ("Unit `" ^ name_for_error ts unit_sym ^ "' has no symbol named `"
                                         ^ part ^ "'."); raise Errors.Compile_error
                         end
-                    | Right(expr, tp) ->
+                    | Right(expr, tp, lvalue) ->
                         (* Look field up in record type. *)
                         begin match tp with
                             | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, _) ->
                                 begin match maybe_find (fun s -> s.sym_name = part) (get_fields type_sym) with
                                     | Some field ->
-                                        Right(Field_access(loc, expr, field), unsome field.sym_type)
+                                        Right(Field_access(loc, expr, field), unsome field.sym_type, lvalue)
                                     | None ->
                                         Errors.semantic_error loc
                                             ("Type `" ^ name_for_error ts type_sym ^ "' has no field named `" ^ part ^ "'.");
@@ -530,16 +537,16 @@ and trans_expr ts (target_type: ttype option) = function
                 Errors.semantic_error loc
                     ("Expression expected but unit `" ^ name_for_error ts unit_sym ^ "' found.");
                 raise Errors.Compile_error
-            | Right(expr, tp) -> (expr, tp)
+            | Right(expr, tp, lvalue) -> (expr, tp, lvalue)
         end
     | Parse_tree.Int_literal(loc, n) ->
-        (Int_literal(loc, n), Integer_type)
+        (Int_literal(loc, n), Integer_type, false)
     | Parse_tree.String_literal(loc, s) ->
-        (String_literal(loc, s), Pointer_type(Char_type))
+        (String_literal(loc, s), Pointer_type(Char_type), false)
     | Parse_tree.Char_literal(loc, s) ->
-        (Char_literal(loc, s), Char_type)
+        (Char_literal(loc, s), Char_type, false)
     | Parse_tree.Apply(loc, proc, (pos_args, named_args)) ->
-        let proc, proc_type = trans_expr ts None proc in
+        let proc, proc_type, _ = trans_expr ts None proc in
         begin match proc_type with
             | Proc_type(proc_sym) ->
                 (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
@@ -547,7 +554,7 @@ and trans_expr ts (target_type: ttype option) = function
                     let matched_args =
                         List.map (fun (param, arg) ->
                             assert (present param.sym_type);
-                            let arg, arg_type = trans_expr ts param.sym_type arg in
+                            let arg, arg_type, _ = trans_expr ts param.sym_type arg in
                             coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
                                 ("for parameter `" ^ param.sym_name ^ "'") arg_type;
                             (param, arg)
@@ -555,7 +562,7 @@ and trans_expr ts (target_type: ttype option) = function
                             (get_params proc_sym) pos_args named_args) in
                     (* TODO: Bind type variables in return type. *)
                     (Apply(loc, proc, matched_args),
-                     unsome proc_sym.sym_type)
+                     unsome proc_sym.sym_type, false)
                 ) ()
         end
     | Parse_tree.Record_cons(loc, (pos_fields, named_fields)) ->
@@ -574,21 +581,21 @@ and trans_expr ts (target_type: ttype option) = function
         (Record_cons(loc, rec_sym,
             List.map (fun (field, expr) ->
                 assert (present field.sym_type);
-                let expr, expr_type = trans_expr ts field.sym_type expr in
+                let expr, expr_type, _ = trans_expr ts field.sym_type expr in
                 coerce ts loc (unsome field.sym_type)
                     ("for field `" ^ field.sym_name ^ "'") expr_type;
                 (field, expr)
             ) (match_args_to_params loc "record fields"
                 (get_fields rec_sym) pos_fields named_fields)
-         ), Named_type(rec_sym, []))
+         ), Named_type(rec_sym, []), false)
     | Parse_tree.Binop(loc, lhs, op, rhs) ->
-        let lhs, lhs_type = trans_expr ts None lhs in
-        let rhs, rhs_type = trans_expr ts None rhs in
+        let lhs, lhs_type, _ = trans_expr ts None lhs in
+        let rhs, rhs_type, _ = trans_expr ts None rhs in
         match_types ts loc lhs_type rhs_type;
         (Binop(loc, lhs, op, rhs),
-            match op with
+            (match op with
                 | Add|Subtract|Multiply|Divide -> lhs_type
-                | LT|GT|LE|GE|EQ|NE -> Boolean_type)
+                | LT|GT|LE|GE|EQ|NE -> Boolean_type), false)
 
 
 (*

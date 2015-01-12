@@ -116,7 +116,7 @@ and trans_iexpr s = function
     | String_literal(loc, s) ->
         "\"" ^ s ^ "\""
     | Char_literal(loc, s) ->
-        "'" ^ String.make 1 s ^ "'"
+        "'" ^ s ^ "'"
     | Apply(loc, proc_e, args) ->
         trans_iexpr s proc_e ^ "("
         ^ String.concat ", " (List.map (fun (param, arg) ->

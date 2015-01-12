@@ -17,10 +17,10 @@
 %token <string> IDENT
 %token <string> STRING
 %token <Big_int.big_int> INTEGER
-%token <char> CHARLIT
+%token <string> CHARLIT
 
 /* Keywords */
-%token ABSTRACT CONST DISP ELSE ELSIF END IF IMPORTED IS LOOP OVERRIDE PROC RETURN THEN
+%token ABSTRACT CONST DISP ELSE ELSIF END IF IMPORTED IS LOOP OUT OVERRIDE PROC RETURN THEN
 %token TYPE UNIT VAR WHILE WITH
 
 
@@ -113,7 +113,11 @@ params:
     | param { [$1] }
     | param COMMA params { $1::$3 }
 param:
-    | opt_disp IDENT opt_type { (loc(), $2, $3, $1) }
+    | opt_mode IDENT opt_disp opt_type { (loc(), $2, $4, $1, $3) }
+opt_mode:
+    | /* empty */ { Symtab.Const_param }
+    | VAR { Symtab.Var_param }
+    | OUT { Symtab.Out_param }
 opt_disp:
     | /* empty */ { false }
     | DISP { true }
