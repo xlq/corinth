@@ -87,6 +87,8 @@ decl:
     | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS proc_body END IDENT SEMICOLON
         { check_end (rhs_start_pos 2, $2) (rhs_start_pos 11, $11);
           Proc_decl(loc(), $2, $3, $5, $7, $9) }
+    | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS IMPORTED SEMICOLON
+        { Proc_import(loc(), $2, $3, $5, $7) }
     | CONST IDENT ASSIGN expr SEMICOLON
         { Const_decl(loc(), $2, $4) }
 

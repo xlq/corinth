@@ -29,6 +29,7 @@ type symbol = {
     mutable sym_dispatching: bool; (* Parameter is dispatching (declared "disp") *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
+    mutable sym_imported: bool;
     mutable sym_const: iexpr option;
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?
@@ -81,6 +82,7 @@ let new_root_sym () =
         sym_dispatching = false;
         sym_param_mode = Const_param;
         sym_code = None;
+        sym_imported = false;
         sym_const = None;
         sym_selected = false;
         sym_translated = false;
@@ -107,6 +109,7 @@ let create_sym parent loc name kind =
         sym_dispatching = false;
         sym_param_mode = Const_param;
         sym_code = None;
+        sym_imported = false;
         sym_const = None;
         sym_selected = false;
         sym_translated = false;

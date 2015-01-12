@@ -28,6 +28,7 @@ type symbol = {
     mutable sym_dispatching: bool; (* Parameter is dispatching (declared "disp") *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
+    mutable sym_imported: bool;
     mutable sym_const: iexpr option;
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?

@@ -30,7 +30,9 @@ let c_name_of_dotted_name s parts =
 let c_name_of_local s sym = String.lowercase sym.sym_name
 
 let c_name_of_sym s sym =
-    c_name_of_dotted_name s (dotted_name_of_sym sym)
+    match sym with
+        | {sym_kind=Proc; sym_imported=true} -> sym.sym_name
+        | _ -> c_name_of_dotted_name s (dotted_name_of_sym sym)
 
 let rec c_name_of_type_sym s sym =
     match sym with

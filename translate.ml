@@ -266,6 +266,7 @@ and trans_decl ts = function
     *)
     (* Procedure definition *)
     | Parse_tree.Proc_decl(loc, name, type_params, params, return_type, body) -> begin
+        check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
         trans_type_params {ts with ts_scope = proc_sym} type_params;
         List.iter (fun (loc, name, ttype, disp) ->
@@ -281,6 +282,24 @@ and trans_decl ts = function
             | Some rt -> Some (trans_type {ts with ts_scope = proc_sym} rt)
             | None -> Some No_type);
         todo ts (Todo_proc(body, proc_sym))
+    end
+    | Parse_tree.Proc_import(loc, name, type_params, params, return_type) -> begin
+        check_for_duplicate_definition ts.ts_scope loc name;
+        let proc_sym = create_sym ts.ts_scope loc name Proc in
+        trans_type_params {ts with ts_scope = proc_sym} type_params;
+        List.iter (fun (loc, name, ttype, disp) ->
+            let ttype' = match ttype with
+                | None -> None
+                | Some t -> Some (trans_type {ts with ts_scope = proc_sym} t) in
+            check_for_duplicate_definition proc_sym loc name;
+            let param_sym = create_sym proc_sym loc name Param in
+            param_sym.sym_type <- ttype';
+            param_sym.sym_param_mode <- Const_param (* TODO *)
+        ) params;
+        proc_sym.sym_type <- (match return_type with
+            | Some rt -> Some (trans_type {ts with ts_scope = proc_sym} rt)
+            | None -> Some No_type);
+        proc_sym.sym_imported <- true
     end
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Type_alias(other)) ->
         check_for_duplicate_definition ts.ts_scope loc name;

@@ -13,6 +13,7 @@ and decl =
     | Type_decl of loc * string * (loc * string) list * type_defn
     | Var_decl of loc * string * ttype option * expr option
     | Proc_decl of loc * string * (loc * string) list * param list * ttype option * stmt list
+    | Proc_import of loc * string * (loc * string) list * param list * ttype option
     | Const_decl of loc * string * expr
 
 and type_defn =
