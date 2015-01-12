@@ -169,6 +169,7 @@ expr:
     | expr GE expr { Binop(loc(), $1, Symtab.GE, $3) }
     | expr EQ expr { Binop(loc(), $1, Symtab.EQ, $3) }
     | expr NE expr { Binop(loc(), $1, Symtab.NE, $3) }
+    | expr CARET { Deref(loc(), $1) }
 
 expr_map:
     | expr { ([$1], []) }

@@ -21,6 +21,8 @@ type translation_state = {
     ts_scope: symbol;
     ts_todo: todo list ref;
     ts_block: istmt list ref option;
+    ts_exists: symbol list; (* list of symbols whose type parameters
+                               are existentially quantified and can be unified *)
 }
 
 let new_translation_state root = {
@@ -28,7 +30,21 @@ let new_translation_state root = {
     ts_scope = root;
     ts_todo = ref [];
     ts_block = None;
+    ts_exists = [];
 }
+
+(* Mark type parameters of the given symbol as existentially quantified
+   while f is called with the translation state. *)
+let exi_quant_param ts sym f =
+    assert (List.for_all (function
+        | {sym_kind=Type_param; sym_type=None} -> true
+        | {sym_kind=Type_param; sym_type=Some _} -> false
+        | _ -> true) sym.sym_locals);
+    let result = f {ts with ts_exists = sym :: ts.ts_exists} in
+    List.iter (function
+        | {sym_kind=Type_param; sym_type=Some t} as sym -> sym.sym_type <- None
+        | _ -> ()) sym.sym_locals;
+    result
 
 let todo ts x =
     ts.ts_todo := x :: !(ts.ts_todo)
@@ -78,13 +94,23 @@ let rec unwind_unifs stop_at = function
 
 let reset_unifs sym =
     List.iter (function
-        | {sym_kind=Type_param} as param -> param.sym_type <- None
+        | {sym_kind=Type_param; sym_type=Some t} as param ->
+            prerr_endline ("Resetting " ^ full_name param ^ " -> " ^ string_of_type t);
+            param.sym_type <- None
         | _ -> ()
     ) sym.sym_locals
 
-let unify ts v t =
+let unify ts loc v t =
     (* TODO: Occurs check? *)
     assert (match v.sym_type with None -> true | Some _ -> false);
+    if not (List.exists ((==) v.sym_parent) ts.ts_exists) then begin
+        Errors.semantic_error loc
+            ("Cannot use type parameter `" ^ v.sym_name
+                ^ "' as type `" ^ string_of_type t
+                ^ "' because `" ^ v.sym_name
+                ^ "' could be anything!"); (* I don't know what sensible message to put here. *)
+        raise Compile_error
+    end;
     (*ts.ts_unifications := v :: !(ts.ts_unifications);*)
     v.sym_type <- Some t;
     prerr_endline ("Unifying " ^ full_name v ^ " -> " ^ string_of_type t)
@@ -141,7 +167,7 @@ let rec coerce_int ts loc target_type why_target source_type =
         | Named_type({sym_kind=Type_param; sym_type=None} as tp, []), t2 ->
             (* Target type parameter isn't unified, so it could be anything.
                Now we know it must be t2. *)
-            unify ts tp t2
+            unify ts loc tp t2
         | Named_type(s1, params1), Named_type(s2, params2) when s1 == s2 ->
             List.iter2 (fun (param1, arg1) (param2, arg2) ->
                 assert (param1 == param2);
@@ -181,9 +207,9 @@ let rec match_types_int ts loc t1 t2 =
         | t1, Named_type({sym_kind=Type_param; sym_type=Some t2}, []) ->
             match_types_int ts loc t1 t2
         | Named_type({sym_kind=Type_param; sym_type=None} as tp, []), t2 ->
-            unify ts tp t2
+            unify ts loc tp t2
         | t1, Named_type({sym_kind=Type_param; sym_type=None} as tp, []) ->
-            unify ts tp t1
+            unify ts loc tp t1
         (* Type aliases. *)
         | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
         | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) ->
@@ -259,6 +285,7 @@ let rec loc_of_iexpr = function
     | Record_cons(loc, _, _)
     | Field_access(loc, _, _)
     | Binop(loc, _, _, _)
+    | Deref(loc, _)
         -> loc
 
 let rec trans_unit ts = function
@@ -572,29 +599,30 @@ and trans_expr ts (target_type: ttype option) = function
         begin match proc_type with
             | Proc_type(proc_sym) ->
                 (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
-                let matched_args =
-                    List.map (fun (param, arg) ->
-                        assert (present param.sym_type);
-                        let arg, arg_type, lvalue = trans_expr ts param.sym_type arg in
-                        begin match param.sym_param_mode with
-                            | Var_param | Out_param ->
-                                if not lvalue then begin
-                                    Errors.semantic_error (loc_of_iexpr arg)
-                                        ("Cannot assign to this expression (parameter `"
-                                            ^ param.sym_name ^ "' is declared `"
-                                            ^ (match param.sym_param_mode with Var_param -> "var"
-                                                                             | Out_param -> "out") ^ "'.");
-                                end
-                            | Const_param -> ()
-                        end;
-                        coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
-                            ("for parameter `" ^ param.sym_name ^ "'") arg_type;
-                        (param, arg)
-                    ) (match_args_to_params loc "arguments"
-                        (get_params proc_sym) pos_args named_args) in
-                let return_type = follow_tparams (unsome proc_sym.sym_type) in
-                reset_unifs proc_sym;
-                (Apply(loc, proc, matched_args), return_type, false)
+                exi_quant_param ts proc_sym (fun ts ->
+                    let matched_args =
+                        List.map (fun (param, arg) ->
+                            assert (present param.sym_type);
+                            let arg, arg_type, lvalue = trans_expr ts param.sym_type arg in
+                            begin match param.sym_param_mode with
+                                | Var_param | Out_param ->
+                                    if not lvalue then begin
+                                        Errors.semantic_error (loc_of_iexpr arg)
+                                            ("Cannot assign to this expression (parameter `"
+                                                ^ param.sym_name ^ "' is declared `"
+                                                ^ (match param.sym_param_mode with Var_param -> "var"
+                                                                                 | Out_param -> "out") ^ "'.");
+                                    end
+                                | Const_param -> ()
+                            end;
+                            coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
+                                ("for parameter `" ^ param.sym_name ^ "'") arg_type;
+                            (param, arg)
+                        ) (match_args_to_params loc "arguments"
+                            (get_params proc_sym) pos_args named_args) in
+                    (Apply(loc, proc, matched_args),
+                     follow_tparams (unsome proc_sym.sym_type) (* return type *), false)
+                )
         end
     | Parse_tree.Record_cons(loc, (pos_fields, named_fields)) ->
         (* Get record type from context. *)
@@ -627,6 +655,17 @@ and trans_expr ts (target_type: ttype option) = function
             (match op with
                 | Add|Subtract|Multiply|Divide -> lhs_type
                 | LT|GT|LE|GE|EQ|NE -> Boolean_type), false)
+    | Parse_tree.Deref(loc, ptr) ->
+        let ptr, ptr_type, _ = trans_expr ts None ptr in
+        begin match actual_type ptr_type with
+            | Pointer_type(t) ->
+                (Deref(loc, ptr), t, true)
+            | _ ->
+                Errors.semantic_error loc
+                    ("Cannot dereference value of type `"
+                        ^ string_of_type ptr_type ^ "'.");
+                raise Compile_error
+        end
 
 
 (*

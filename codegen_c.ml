@@ -142,6 +142,8 @@ and trans_iexpr s = function
                 trans_iexpr s value) fields) ^ "}"
     | Field_access(loc, lhs, field) ->
         (trans_iexpr s lhs) ^ "." ^ c_name_of_local s field
+    | Deref(loc, ptr) ->
+        "*(" ^ trans_iexpr s ptr ^ ")"
 
 let func_prototype s proc_sym =
     (match proc_sym.sym_type with
@@ -250,6 +252,7 @@ and declare_prereq_expr s = function
         List.iter (fun (_, e) -> declare_prereq_expr s e) fields
     | Field_access(loc, e, _) -> declare_prereq_expr s e
     | Binop(loc, lhs, op, rhs) -> declare_prereq_expr s lhs; declare_prereq_expr s rhs
+    | Deref(loc, ptr) -> declare_prereq_expr s ptr
 
 let declare_locals s proc_sym =
     List.iter (fun sym ->

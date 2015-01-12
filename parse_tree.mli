@@ -46,3 +46,4 @@ and expr =
     | Apply of loc * expr * expr args
     | Record_cons of loc * expr args
     | Binop of loc * expr * Symtab.binop * expr
+    | Deref of loc * expr

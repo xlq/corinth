@@ -64,6 +64,7 @@ and iexpr =
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
+    | Deref of loc * iexpr
 
 val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)
