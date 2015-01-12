@@ -44,6 +44,7 @@ let rec c_name_of_type_sym s sym =
 and c_name_of_type s = function
     | Boolean_type -> "bool"
     | Integer_type -> "int"
+    | Char_type -> "char"
     | Named_type({sym_kind=Type_sym} as type_sym, _) -> c_name_of_type_sym s type_sym
     | Named_type({sym_kind=Type_param}, []) -> "void"
     | Pointer_type(t) -> c_name_of_type s t ^ "*"
@@ -183,6 +184,7 @@ and declare_type s complete = function
         declare_type s false t
     | Boolean_type -> ()
     | Integer_type -> ()
+    | Char_type -> ()
     | Named_type({sym_kind=Type_param}, []) -> ()
     | Named_type({sym_kind=Type_sym} as type_sym, _) -> declare s complete type_sym
 
@@ -200,7 +202,45 @@ and declare_prerequisites s = function
     | {sym_kind=Type_param} -> ()
     | {sym_kind=Proc} as proc_sym ->
         declare_type s true (unsome proc_sym.sym_type);
-        List.iter (declare_prerequisites s) proc_sym.sym_locals
+        List.iter (declare_prerequisites s) proc_sym.sym_locals;
+        if not proc_sym.sym_imported then
+            List.iter (declare_prereq_stmt s) (unsome proc_sym.sym_code)
+
+and declare_prereq_stmt s = function
+    | Call(loc, f, args) ->
+        declare_prereq_expr s (Apply(loc, f, args))
+    | Assign(loc, a, b) ->
+        declare_prereq_expr s a;
+        declare_prereq_expr s b
+    | Return(loc, Some e) -> declare_prereq_expr s e
+    | Return(loc, None) -> ()
+    | If_stmt(bits, else_part) ->
+        List.iter (fun (loc, cond, body) ->
+            declare_prereq_expr s cond;
+            List.iter (declare_prereq_stmt s) body
+        ) bits;
+        begin match else_part with
+            | Some(loc, body) ->
+                List.iter (declare_prereq_stmt s) body
+            | None -> ()
+        end
+    | While_stmt(loc, cond, body) ->
+        declare_prereq_expr s cond;
+        List.iter (declare_prereq_stmt s) body
+
+and declare_prereq_expr s = function
+    | Name(loc, sym) -> declare s false sym
+    | Int_literal _ -> ()
+    | String_literal _ -> ()
+    | Apply(loc, f, args) ->
+        declare_prereq_expr s f;
+        List.iter (fun (param,arg) ->
+            declare_prereq_expr s arg
+        ) args
+    | Record_cons(loc, _, fields) ->
+        List.iter (fun (_, e) -> declare_prereq_expr s e) fields
+    | Field_access(loc, e, _) -> declare_prereq_expr s e
+    | Binop(loc, lhs, op, rhs) -> declare_prereq_expr s lhs; declare_prereq_expr s rhs
 
 let declare_locals s proc_sym =
     List.iter (fun sym ->
