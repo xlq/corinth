@@ -30,6 +30,8 @@ and stmt =
     | Decl of decl
     | Expr of expr
     | Return of loc * expr option
+    | If_stmt of (loc * expr * stmt list) list * (loc * stmt list) option
+    | While_stmt of loc * expr * stmt list
 
 and expr =
     | Name of loc * dotted_name

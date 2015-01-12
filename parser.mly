@@ -18,7 +18,8 @@
 %token <Big_int.big_int> INTEGER
 
 /* Keywords */
-%token ABSTRACT DISP END IS OVERRIDE PROC RETURN TYPE UNIT VAR WITH
+%token ABSTRACT DISP ELSE ELSIF END IF IS LOOP OVERRIDE PROC RETURN THEN
+%token TYPE UNIT VAR WHILE WITH
 
 
 %token LPAREN RPAREN LBRACE RBRACE QUESTION COLON SEMICOLON DOT COMMA STAR
@@ -119,6 +120,18 @@ stmt:
     | expr SEMICOLON { Expr $1 }
     | RETURN expr SEMICOLON { Return(loc(), Some $2) }
     | RETURN SEMICOLON { Return(loc(), None) }
+    | IF expr THEN proc_body else_parts END IF SEMICOLON {
+        let elsif_parts, else_part = $5 in
+        If_stmt((loc(), $2, $4) :: elsif_parts, else_part) }
+    | WHILE expr LOOP proc_body END LOOP SEMICOLON
+        { While_stmt(loc(), $2, $4) }
+
+else_parts:
+    | /* empty */ { ([], None) }
+    | ELSIF expr THEN proc_body else_parts
+        { let a, b = $5 in ((loc(), $2, $4) :: a, b) }
+    | ELSE proc_body
+        { ([], Some(loc(), $2)) }
 
 expr:
     | LPAREN expr RPAREN { $2 }

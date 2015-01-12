@@ -75,6 +75,22 @@ let rec trans_istmt s = function
         emit s ("return;")
     | Return(loc, Some e) ->
         emit s ("return " ^ trans_iexpr s e ^ ";")
+    | If_stmt(if_parts, else_part) ->
+        List.iter (fun (loc, cond, body) ->
+            emit s ("if (" ^ trans_iexpr s cond ^ "){");
+            trans_istmts (indent s) body;
+        ) if_parts;
+        begin match else_part with
+            | None -> ()
+            | Some (loc, body) ->
+                emit s ("} else {");
+                trans_istmts (indent s) body;
+        end;
+        emit s "}"
+    | While_stmt(loc, cond, body) ->
+        emit s ("while (" ^ trans_iexpr s cond ^ "){");
+        trans_istmts (indent s) body;
+        emit s "}"
 
 and trans_istmts s = List.iter (trans_istmt s)
 

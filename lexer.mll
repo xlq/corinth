@@ -10,17 +10,22 @@
     let keywords = create_hashtable [
         "abstract",      ABSTRACT;
         "disp",          DISP;
+        "else",          ELSE;
+        "elsif",         ELSIF;
         "end",           END;
+        "if",            IF;
         "is",            IS;
+        "loop",          LOOP;
         "override",      OVERRIDE;
         "proc",          PROC;
         "return",        RETURN;
+        "then",          THEN;
         "type",          TYPE;
         "unit",          UNIT;
         "var",           VAR;
+        "while",         WHILE;
         "with",          WITH;
     ]
-        
 }
 
 rule scan = parse

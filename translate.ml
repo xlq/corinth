@@ -410,6 +410,29 @@ and trans_stmt ts = function
                      ^ "' must return a value.")
             | _ -> assert false
         end
+    | Parse_tree.If_stmt(parts, else_part) ->
+        emit ts (If_stmt(
+            List.map (fun (loc, condition, body) ->
+                let condition, condition_type = trans_expr ts
+                    (Some Boolean_type) condition in
+                coerce ts loc Boolean_type "for condition" condition_type;
+                let body' = ref [] in
+                trans_stmts {ts with ts_block = Some body'} body;
+                (loc, condition, !body')
+            ) parts,
+            match else_part with
+                | None -> None
+                | Some (loc, else_body) ->
+                    let body' = ref [] in
+                    trans_stmts {ts with ts_block = Some body'} else_body;
+                    Some (loc, !body')
+        ))
+    | Parse_tree.While_stmt(loc, cond, body) ->
+        let cond, cond_type = trans_expr ts (Some Boolean_type) cond in
+        coerce ts loc Boolean_type "for condition" cond_type;
+        let body' = ref [] in
+        trans_stmts {ts with ts_block = Some body'} body;
+        emit ts (While_stmt(loc, cond, !body'))
 
 (* Translate expression and return (iexpr * ttype) pair.
    target_type is the type of the expression's context, if known.

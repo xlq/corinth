@@ -49,6 +49,8 @@ and istmt =
     | Call of loc * iexpr * (symbol * iexpr) list
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
+    | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
+    | While_stmt of loc * iexpr * istmt list
 
 and iexpr =
     | Name of loc * symbol

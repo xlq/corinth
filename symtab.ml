@@ -50,6 +50,8 @@ and istmt =
     | Call of loc * iexpr * (symbol * iexpr) list
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
+    | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
+    | While_stmt of loc * iexpr * istmt list
 
 and iexpr =
     | Name of loc * symbol
@@ -143,6 +145,7 @@ let get_params sym =
     List.filter (fun s -> s.sym_kind = Param) sym.sym_locals
 
 let rec string_of_type = function
+    | Boolean_type -> "bool"
     | Integer_type -> "int"
     | Named_type(sym, []) -> sym.sym_name
     | Named_type(sym, args) ->
