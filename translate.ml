@@ -282,11 +282,13 @@ and trans_decl ts = function
         todo ts (Todo_proc(body, proc_sym))
     end
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Type_alias(other)) ->
+        check_for_duplicate_definition ts.ts_scope loc name;
         let other = trans_type ts other in
         let type_sym = create_sym ts.ts_scope loc name Type_sym in
         type_sym.sym_type <- Some other
     (* Record type declaration *)
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Record_type(fields)) ->
+        check_for_duplicate_definition ts.ts_scope loc name;
         let type_sym = create_sym ts.ts_scope loc name Type_sym in
         trans_type_params {ts with ts_scope = type_sym} type_params;
         type_sym.sym_type <- Some (Record_type(None)); (* TODO: base record *)
@@ -300,6 +302,7 @@ and trans_decl ts = function
                     (create_sym type_sym loc "" Var).sym_type <- Some ttype'
         ) fields
     | Parse_tree.Var_decl(loc, name, maybe_type, maybe_init) ->
+        check_for_duplicate_definition ts.ts_scope loc name;
         let var_sym = create_sym ts.ts_scope loc name Var in
         begin match maybe_type with
             | Some specified_type ->
@@ -329,6 +332,7 @@ and trans_decl ts = function
                 end
         end
     | Parse_tree.Const_decl(loc, name, expr) ->
+        check_for_duplicate_definition ts.ts_scope loc name;
         let const_sym = create_sym ts.ts_scope loc name Const in
         let expr, expr_type = trans_expr ts None expr in
         const_sym.sym_type <- Some expr_type;
