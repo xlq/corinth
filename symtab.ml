@@ -34,7 +34,7 @@ type symbol = {
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?
         If false, some children may be missing. *)
-    mutable sym_backend_translated: bool;
+    mutable sym_backend_translated: int;
 }
 
 and param_mode = Const_param | Var_param | Out_param
@@ -87,7 +87,7 @@ let new_root_sym () =
         sym_const = None;
         sym_selected = false;
         sym_translated = false;
-        sym_backend_translated = false;
+        sym_backend_translated = 0;
     } in sym
 
 let describe_sym sym =
@@ -114,7 +114,7 @@ let create_sym parent loc name kind =
         sym_const = None;
         sym_selected = false;
         sym_translated = false;
-        sym_backend_translated = false;
+        sym_backend_translated = 0;
     } in
     parent.sym_locals <- parent.sym_locals @ [new_sym];
     new_sym

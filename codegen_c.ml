@@ -152,12 +152,12 @@ let func_prototype s proc_sym =
     ^ ")"
 
 let rec declare s complete sym =
-    if not sym.sym_backend_translated then begin
+    if sym.sym_backend_translated < (if complete then 2 else 1) then begin
         if complete then declare_prerequisites s sym;
         match sym with
             | {sym_kind=Type_sym; sym_type=Some(Record_type None)} as type_sym ->
                 if complete then begin
-                    type_sym.sym_backend_translated <- true;
+                    type_sym.sym_backend_translated <- 2;
                     emit s (c_name_of_type_sym s type_sym ^ " {");
                     begin let s = indent s in
                         List.iter (function
@@ -170,12 +170,15 @@ let rec declare s complete sym =
                     emit s "};";
                     emit s ""
                 end else begin
+                    type_sym.sym_backend_translated <- 1;
                     emit s (c_name_of_type_sym s type_sym ^ ";") (* "struct foo;" *)
                 end
-            | {sym_kind=Type_sym; sym_type=Some t} ->
-                declare_type s true t
+            | {sym_kind=Type_sym; sym_type=Some t} as type_sym ->
+                declare_type s true t;
+                type_sym.sym_backend_translated <- 1
             | {sym_kind=Proc} as proc_sym ->
-                emit s (func_prototype s proc_sym ^ ";")
+                emit s (func_prototype s proc_sym ^ ";");
+                proc_sym.sym_backend_translated <- 1
     end
 
 and declare_type s complete = function
