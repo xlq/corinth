@@ -20,7 +20,7 @@
 %token <string> CHARLIT
 
 /* Keywords */
-%token ABSTRACT CONST DISP ELSE ELSIF END IF IMPORTED IS LOOP OUT OVERRIDE PROC RETURN THEN
+%token ABSTRACT CONST DISP ELSE ELSIF END IF IMPORTED IS LOOP OUT OVERRIDING PROC RETURN THEN
 %token TYPE UNIT VAR WHILE WITH
 
 
@@ -88,7 +88,9 @@ decl:
         { Var_decl(loc(), $2, $3, $4) }
     | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS proc_body END IDENT SEMICOLON
         { check_end (rhs_start_pos 2, $2) (rhs_start_pos 11, $11);
-          Proc_decl(loc(), $2, $3, $5, $7, $9) }
+          Proc_decl(loc(), $2, $3, $5, $7, Some $9) }
+    | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS ABSTRACT SEMICOLON
+        { Proc_decl(loc(), $2, $3, $5, $7, None) }
     | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS IMPORTED SEMICOLON
         { Proc_import(loc(), $2, $3, $5, $7) }
     | CONST IDENT ASSIGN expr SEMICOLON
@@ -102,7 +104,10 @@ type_params:
     | type_param { [$1] }
     | type_param COMMA type_params { $1::$3 }
 type_param:
-    | IDENT { (loc(), $1) }
+    | opt_disp IDENT { (loc(), $2, $1) }
+opt_disp:
+    | /* empty */ { false }
+    | DISP { true }
 
 opt_init:
     | /* empty */ { None }
@@ -113,14 +118,11 @@ params:
     | param { [$1] }
     | param COMMA params { $1::$3 }
 param:
-    | opt_mode IDENT opt_disp opt_type { (loc(), $2, $4, $1, $3) }
+    | opt_mode IDENT opt_type { (loc(), $2, $3, $1) }
 opt_mode:
     | /* empty */ { Symtab.Const_param }
     | VAR { Symtab.Var_param }
     | OUT { Symtab.Out_param }
-opt_disp:
-    | /* empty */ { false }
-    | DISP { true }
 opt_type:
     | /* empty */ { None }
     | COLON ttype { Some $2 }

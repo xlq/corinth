@@ -318,11 +318,23 @@ and trans_decl ts = function
         ) names
     *)
     (* Procedure definition *)
-    | Parse_tree.Proc_decl(loc, name, type_params, params, return_type, body) -> begin
+    | (Parse_tree.Proc_decl(loc, name, type_params, params, return_type, _) as decl)
+    | (Parse_tree.Proc_import(loc, name, type_params, params, return_type) as decl) -> begin
         check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
-        trans_type_params {ts with ts_scope = proc_sym} type_params;
-        List.iter (fun (loc, name, ttype, mode, disp) ->
+        (* Type parameters *)
+        let type_params = trans_type_params {ts with ts_scope = proc_sym} type_params in
+        let dispatching_type_param = List.fold_left (fun disp_tp tp ->
+            if not tp.sym_dispatching then disp_tp else
+            match disp_tp with
+                | None -> Some tp
+                | Some tp' ->
+                    Errors.semantic_error (unsome tp'.sym_defined)
+                        ("Only one type parameter can be marked as dispatching.");
+                    Some tp'
+        ) None type_params in
+        (* Parameters *)
+        List.iter (fun (loc, name, ttype, mode) ->
             let ttype' = match ttype with
                 | None -> None
                 | Some t -> Some (trans_type {ts with ts_scope = proc_sym} t) in
@@ -331,28 +343,14 @@ and trans_decl ts = function
             param_sym.sym_type <- ttype';
             param_sym.sym_param_mode <- mode
         ) params;
+        (* Return type *)
         proc_sym.sym_type <- (match return_type with
             | Some rt -> Some (trans_type {ts with ts_scope = proc_sym} rt)
             | None -> Some No_type);
-        todo ts (Todo_proc(body, proc_sym))
-    end
-    | Parse_tree.Proc_import(loc, name, type_params, params, return_type) -> begin
-        check_for_duplicate_definition ts.ts_scope loc name;
-        let proc_sym = create_sym ts.ts_scope loc name Proc in
-        trans_type_params {ts with ts_scope = proc_sym} type_params;
-        List.iter (fun (loc, name, ttype, mode, disp) ->
-            let ttype' = match ttype with
-                | None -> None
-                | Some t -> Some (trans_type {ts with ts_scope = proc_sym} t) in
-            check_for_duplicate_definition proc_sym loc name;
-            let param_sym = create_sym proc_sym loc name Param in
-            param_sym.sym_type <- ttype';
-            param_sym.sym_param_mode <- mode
-        ) params;
-        proc_sym.sym_type <- (match return_type with
-            | Some rt -> Some (trans_type {ts with ts_scope = proc_sym} rt)
-            | None -> Some No_type);
-        proc_sym.sym_imported <- true
+        match decl with
+            | Parse_tree.Proc_decl(_, _, _, _, _, Some body) -> todo ts (Todo_proc(body, proc_sym))
+            | Parse_tree.Proc_decl(_, _, _, _, _, None) -> proc_sym.sym_abstract <- true
+            | Parse_tree.Proc_import(_, _, _, _, _) -> proc_sym.sym_imported <- true
     end
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Type_alias(other)) ->
         check_for_duplicate_definition ts.ts_scope loc name;
@@ -363,7 +361,12 @@ and trans_decl ts = function
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Record_type(fields)) as decl ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let type_sym = create_sym ts.ts_scope loc name Type_sym in
-        trans_type_params {ts with ts_scope = type_sym} type_params;
+        let type_params = trans_type_params {ts with ts_scope = type_sym} type_params in
+        List.iter (fun tparam ->
+            if tparam.sym_dispatching then
+                Errors.semantic_error (unsome tparam.sym_defined)
+                    ("`disp' only makes sense for procedures, not for types.")
+        ) type_params;
         type_sym.sym_type <- Some (Record_type(None)); (* TODO: base record *)
         todo ts (Todo_type(decl, type_sym))
     | Parse_tree.Var_decl(loc, name, maybe_type, maybe_init) ->
@@ -404,9 +407,11 @@ and trans_decl ts = function
         const_sym.sym_const <- Some expr
 
 and trans_type_params ts type_params =
-    List.iter (fun (loc, name) ->
+    List.map (fun (loc, name, dispatching) ->
         check_for_duplicate_definition ts.ts_scope loc name;
-        ignore (create_sym ts.ts_scope loc name Type_param)
+        let new_param = create_sym ts.ts_scope loc name Type_param in
+        new_param.sym_dispatching <- dispatching;
+        new_param
     ) type_params
 
 and trans_type ts = function

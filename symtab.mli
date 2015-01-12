@@ -29,7 +29,8 @@ type symbol = {
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: bool;
-    mutable sym_const: iexpr option;
+    mutable sym_abstract: bool;
+    mutable sym_const: iexpr option; (* definition of constants *)
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?
         If false, some children may be missing. *)

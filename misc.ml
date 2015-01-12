@@ -1,3 +1,8 @@
+let rec last = function
+    | [] -> raise (Failure "last")
+    | [x] -> x
+    | x::l -> last l
+
 let rec comma_concat connective strings =
     match strings with
         | [] -> ""

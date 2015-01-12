@@ -19,7 +19,7 @@
         "is",            IS;
         "loop",          LOOP;
         "out",           OUT;
-        "override",      OVERRIDE;
+        "overriding",    OVERRIDING;
         "proc",          PROC;
         "return",        RETURN;
         "then",          THEN;

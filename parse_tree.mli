@@ -9,18 +9,21 @@ type 'a args =
 type unit_decl =
     | Unit of loc * dotted_name * decl list
 
+and type_param = loc * string * bool (* dispatching? *)
+
 and decl =
-    | Type_decl of loc * string * (loc * string) list * type_defn
+    | Type_decl of loc * string * type_param list * type_defn
     | Var_decl of loc * string * ttype option * expr option
-    | Proc_decl of loc * string * (loc * string) list * param list * ttype option * stmt list
-    | Proc_import of loc * string * (loc * string) list * param list * ttype option
+    | Proc_decl of loc * string * type_param list * param list * ttype option
+            * stmt list option (* None if procedure is abstract *)
+    | Proc_import of loc * string * type_param list * param list * ttype option
     | Const_decl of loc * string * expr
 
 and type_defn =
     | Type_alias of ttype
     | Record_type of (loc * string option * ttype) list
 
-and param = loc * string * ttype option * Symtab.param_mode * bool
+and param = loc * string * ttype option * Symtab.param_mode
 
 and ttype =
     | Boolean_type
