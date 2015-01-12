@@ -12,7 +12,7 @@ type sym_kind =
     | Type_sym
     | Type_param
     | Param
-    | Temp
+    | Const
 
 type symbol = {
     sym_parent: symbol; (* Parent symbol (this symbol is in sym_parent.sym_locals). *)
@@ -28,6 +28,7 @@ type symbol = {
     mutable sym_dispatching: bool; (* Parameter is dispatching (declared "disp") *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
+    mutable sym_const: iexpr option;
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?
         If false, some children may be missing. *)
@@ -40,6 +41,7 @@ and ttype =
     | No_type
     | Boolean_type
     | Integer_type  (* This is temporary, for development *)
+    | Char_type
     | Named_type of symbol * (symbol * ttype) list
     | Pointer_type of ttype
     | Record_type of symbol option
@@ -63,7 +65,6 @@ and iexpr =
 val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)
 val create_sym : symbol -> loc -> string -> sym_kind -> symbol
-val create_temp : symbol -> loc -> ttype -> symbol
 val get_type_params : symbol -> symbol list
 val get_fields : symbol -> symbol list (* get record fields, including from base type *)
 val get_params : symbol -> symbol list (* get proc parameters *)

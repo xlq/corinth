@@ -9,6 +9,7 @@
 
     let keywords = create_hashtable [
         "abstract",      ABSTRACT;
+        "const",         CONST;
         "disp",          DISP;
         "else",          ELSE;
         "elsif",         ELSIF;

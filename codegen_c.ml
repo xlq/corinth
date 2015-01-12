@@ -52,7 +52,6 @@ let c_name_of_var s sym =
                 | Unit -> c_name_of_sym s sym   (* global variable *)
             end
         | Param -> c_name_of_local s sym
-        | Temp -> "t" ^ sym.sym_name ^ "_"
 
 let rec is_scalar = function
     | Integer_type -> true
@@ -100,6 +99,8 @@ and trans_iexpr s = function
             c_name_of_var s sym
         else
             "(*" ^ c_name_of_var s sym ^ ")"
+    | Name(loc, {sym_kind=Const; sym_const=Some e}) ->
+        trans_iexpr s e
     | Name(loc, sym) ->
         c_name_of_var s sym
     | Int_literal(loc, n) ->
@@ -183,7 +184,7 @@ and declare_prerequisites s = function
             | {sym_kind=Var} as field ->
                 declare_type s true (unsome field.sym_type)
         ) type_sym.sym_locals
-    | {sym_kind=Var|Param|Temp} as var_sym ->
+    | {sym_kind=Var|Param} as var_sym ->
         declare_type s true (unsome var_sym.sym_type)
     | {sym_kind=Type_param} -> ()
     | {sym_kind=Proc} as proc_sym ->
@@ -193,7 +194,7 @@ and declare_prerequisites s = function
 let declare_locals s proc_sym =
     List.iter (fun sym ->
         match sym.sym_kind with
-            | Var|Temp ->
+            | Var ->
                 emit s (c_name_of_type s (unsome sym.sym_type)
                     ^ " " ^ c_name_of_var s sym ^ ";");
             | _ -> ()

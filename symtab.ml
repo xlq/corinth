@@ -13,7 +13,7 @@ type sym_kind =
     | Type_sym
     | Type_param
     | Param
-    | Temp
+    | Const
 
 type symbol = {
     sym_parent: symbol; (* Parent symbol (this symbol is in sym_parent.sym_locals). *)
@@ -29,6 +29,7 @@ type symbol = {
     mutable sym_dispatching: bool; (* Parameter is dispatching (declared "disp") *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
+    mutable sym_const: iexpr option;
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?
         If false, some children may be missing. *)
@@ -41,6 +42,7 @@ and ttype =
     | No_type
     | Boolean_type
     | Integer_type  (* This is temporary, for development *)
+    | Char_type
     | Named_type of symbol * (symbol * ttype) list
     | Pointer_type of ttype
     | Record_type of symbol option
@@ -79,6 +81,7 @@ let new_root_sym () =
         sym_dispatching = false;
         sym_param_mode = Const_param;
         sym_code = None;
+        sym_const = None;
         sym_selected = false;
         sym_translated = false;
         sym_backend_translated = false;
@@ -104,27 +107,7 @@ let create_sym parent loc name kind =
         sym_dispatching = false;
         sym_param_mode = Const_param;
         sym_code = None;
-        sym_selected = false;
-        sym_translated = false;
-        sym_backend_translated = false;
-    } in
-    parent.sym_locals <- parent.sym_locals @ [new_sym];
-    new_sym
-
-let temp_counter = ref 0
-
-let create_temp parent loc ttype =
-    incr temp_counter;
-    let new_sym = {
-        sym_parent = parent;
-        sym_kind = Temp;
-        sym_name = string_of_int !temp_counter;
-        sym_defined = Some loc;
-        sym_type = Some ttype;
-        sym_locals = [];
-        sym_dispatching = false;
-        sym_param_mode = Const_param;
-        sym_code = None;
+        sym_const = None;
         sym_selected = false;
         sym_translated = false;
         sym_backend_translated = false;

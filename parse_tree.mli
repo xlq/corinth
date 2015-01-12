@@ -13,6 +13,7 @@ and decl =
     | Type_decl of loc * string * (loc * string) list * type_defn
     | Var_decl of loc * string * ttype option * expr option
     | Proc_decl of loc * string * (loc * string) list * param list * ttype option * stmt list
+    | Const_decl of loc * string * expr
 
 and type_defn =
     | Type_alias of ttype
@@ -21,7 +22,9 @@ and type_defn =
 and param = loc * string * ttype option * bool
 
 and ttype =
+    | Boolean_type
     | Integer_type (* for development *)
+    | Char_type
     | Named_type of loc * dotted_name
     | Applied_type of loc * ttype * ttype args
     | Pointer_type of ttype

@@ -316,6 +316,11 @@ and trans_decl ts = function
                             ("Variable must be initialised or have its type specified.")
                 end
         end
+    | Parse_tree.Const_decl(loc, name, expr) ->
+        let const_sym = create_sym ts.ts_scope loc name Const in
+        let expr, expr_type = trans_expr ts None expr in
+        const_sym.sym_type <- Some expr_type;
+        const_sym.sym_const <- Some expr
 
 and trans_type_params ts type_params =
     List.iter (fun (loc, name) ->
@@ -324,8 +329,9 @@ and trans_type_params ts type_params =
     ) type_params
 
 and trans_type ts = function
-    | Parse_tree.Integer_type ->
-        Integer_type
+    | Parse_tree.Integer_type -> Integer_type
+    | Parse_tree.Boolean_type -> Boolean_type
+    | Parse_tree.Char_type -> Char_type
     | Parse_tree.Named_type(loc, [name]) ->
         begin match search_scopes_or_fail ts loc name with
             | {sym_kind=Type_sym} as typ ->
@@ -446,7 +452,7 @@ and trans_expr ts (target_type: ttype option) = function
         let trans_sym sym =
             match sym.sym_kind with
                 | Unit -> Left(sym)
-                | Var|Param ->
+                | Var|Const|Param ->
                     Right(Name(loc, sym), unsome sym.sym_type)
                 | Proc ->
                     Right (Name(loc, sym), Proc_type (sym))

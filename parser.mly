@@ -18,7 +18,7 @@
 %token <Big_int.big_int> INTEGER
 
 /* Keywords */
-%token ABSTRACT DISP ELSE ELSIF END IF IS LOOP OVERRIDE PROC RETURN THEN
+%token ABSTRACT CONST DISP ELSE ELSIF END IF IS LOOP OVERRIDE PROC RETURN THEN
 %token TYPE UNIT VAR WHILE WITH
 
 
@@ -43,7 +43,13 @@ dotted_name:
     | IDENT DOT dotted_name { $1 :: $3 }
 
 ttype:
-    | dotted_name { if $1 = ["int"] then Integer_type else Named_type(loc(), $1) }
+    | dotted_name {
+        match $1 with
+            | ["bool"] -> Boolean_type
+            | ["int"] -> Integer_type
+            | ["char"] -> Char_type
+            | _ -> Named_type(loc(), $1)
+        }
     | ttype LT type_args GT { Applied_type(loc(), $1, $3) }
     | CARET ttype { Pointer_type($2) }
 
@@ -81,6 +87,8 @@ decl:
     | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS proc_body END IDENT SEMICOLON
         { check_end (rhs_start_pos 2, $2) (rhs_start_pos 11, $11);
           Proc_decl(loc(), $2, $3, $5, $7, $9) }
+    | CONST IDENT ASSIGN expr SEMICOLON
+        { Const_decl(loc(), $2, $4) }
 
 opt_type_params:
     | /* empty */ { [] }
