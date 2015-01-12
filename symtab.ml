@@ -141,7 +141,7 @@ let rec string_of_type = function
     | Named_type(sym, args) ->
         sym.sym_name ^ "<" ^ String.concat ", "
             (List.map (fun (param, arg) ->
-                param.sym_name ^ " => " ^ string_of_type arg) args) ^ ">"
+                param.sym_name ^ "=" ^ string_of_type arg) args) ^ ">"
     | Pointer_type t -> "^" ^ string_of_type t
     | Proc_type _ -> "<proc type>"
 

@@ -21,7 +21,6 @@ type translation_state = {
     ts_scope: symbol;
     ts_todo: todo list ref;
     ts_block: istmt list ref option;
-    ts_unifications: symbol list ref;
 }
 
 let new_translation_state root = {
@@ -29,7 +28,6 @@ let new_translation_state root = {
     ts_scope = root;
     ts_todo = ref [];
     ts_block = None;
-    ts_unifications = ref [];
 }
 
 let todo ts x =
@@ -78,23 +76,16 @@ let rec unwind_unifs stop_at = function
     | [] -> ()
     | sym::tail -> sym.sym_type <- None; unwind_unifs stop_at tail
 
-(* Wrapper function that removes any unifications that are done in "body". *)
-let unification_scope ts body arg =
-    let current_unifs = !(ts.ts_unifications) in
-    try
-        let return_value = body arg in
-        unwind_unifs current_unifs !(ts.ts_unifications);
-        ts.ts_unifications := current_unifs;
-        return_value
-    with e ->
-        unwind_unifs current_unifs !(ts.ts_unifications);
-        ts.ts_unifications := current_unifs;
-        raise e
+let reset_unifs sym =
+    List.iter (function
+        | {sym_kind=Type_param} as param -> param.sym_type <- None
+        | _ -> ()
+    ) sym.sym_locals
 
 let unify ts v t =
     (* TODO: Occurs check? *)
     assert (match v.sym_type with None -> true | Some _ -> false);
-    ts.ts_unifications := v :: !(ts.ts_unifications);
+    (*ts.ts_unifications := v :: !(ts.ts_unifications);*)
     v.sym_type <- Some t;
     prerr_endline ("Unifying " ^ full_name v ^ " -> " ^ string_of_type t)
 
@@ -108,6 +99,15 @@ let rec subst_tparams tparams = function
         snd (List.find (fun (param', arg') -> param == param') tparams)
     | Pointer_type t -> Pointer_type (subst_tparams tparams t)
 
+(* Apply current type parameter substitutions. *)
+let rec follow_tparams = function
+    | No_type -> No_type
+    | Boolean_type -> Boolean_type
+    | Integer_type -> Integer_type
+    | Char_type -> Char_type
+    | Named_type({sym_kind=Type_param; sym_type=Some t}, []) -> t
+    | Pointer_type t -> Pointer_type (follow_tparams t)
+
 (* Return the actual type (follow Named_type) *)
 let rec actual_type = function
     | (Integer_type | Pointer_type _ | Record_type _) as t -> t
@@ -116,7 +116,6 @@ let rec actual_type = function
 let rec same_type t1 t2 =
     match t1, t2 with
         | No_type, No_type -> true
-        | Integer_type, Integer_type -> true
         | Pointer_type(t1), Pointer_type(t2) -> same_type t1 t2
         
         | Named_type(s1, []), Named_type(s2, []) -> s1 == s2
@@ -133,7 +132,6 @@ let rec coerce_int ts loc target_type why_target source_type =
     match target_type, source_type with
         | t1, t2 when t1 == t2 -> () (* short-cut if the types are exactly the same *)
         | No_type, No_type -> ()
-        | Integer_type, Integer_type -> ()
         | Pointer_type(t1), Pointer_type(t2) -> coerce_int ts loc t1 why_target t2
         | Named_type(s1, []), Named_type(s2, []) when s1 == s2 -> () (* same symbol *)
         | Named_type({sym_kind=Type_param; sym_type=Some t1}, []), t2
@@ -158,6 +156,8 @@ let rec coerce_int ts loc target_type why_target source_type =
         (* Type mismatches. *)
         | No_type, _ | _, No_type
         | Integer_type, _ | _, Integer_type
+        | Boolean_type, _ | _, Boolean_type
+        | Char_type, _ | _, Char_type
         | Pointer_type _, _ | _, Pointer_type _
         | Named_type _, Named_type _ ->
             raise Type_mismatch
@@ -572,20 +572,29 @@ and trans_expr ts (target_type: ttype option) = function
         begin match proc_type with
             | Proc_type(proc_sym) ->
                 (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
-                unification_scope ts (fun () ->
-                    let matched_args =
-                        List.map (fun (param, arg) ->
-                            assert (present param.sym_type);
-                            let arg, arg_type, _ = trans_expr ts param.sym_type arg in
-                            coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
-                                ("for parameter `" ^ param.sym_name ^ "'") arg_type;
-                            (param, arg)
-                        ) (match_args_to_params loc "arguments"
-                            (get_params proc_sym) pos_args named_args) in
-                    (* TODO: Bind type variables in return type. *)
-                    (Apply(loc, proc, matched_args),
-                     unsome proc_sym.sym_type, false)
-                ) ()
+                let matched_args =
+                    List.map (fun (param, arg) ->
+                        assert (present param.sym_type);
+                        let arg, arg_type, lvalue = trans_expr ts param.sym_type arg in
+                        begin match param.sym_param_mode with
+                            | Var_param | Out_param ->
+                                if not lvalue then begin
+                                    Errors.semantic_error (loc_of_iexpr arg)
+                                        ("Cannot assign to this expression (parameter `"
+                                            ^ param.sym_name ^ "' is declared `"
+                                            ^ (match param.sym_param_mode with Var_param -> "var"
+                                                                             | Out_param -> "out") ^ "'.");
+                                end
+                            | Const_param -> ()
+                        end;
+                        coerce ts (loc_of_iexpr arg) (unsome param.sym_type)
+                            ("for parameter `" ^ param.sym_name ^ "'") arg_type;
+                        (param, arg)
+                    ) (match_args_to_params loc "arguments"
+                        (get_params proc_sym) pos_args named_args) in
+                let return_type = follow_tparams (unsome proc_sym.sym_type) in
+                reset_unifs proc_sym;
+                (Apply(loc, proc, matched_args), return_type, false)
         end
     | Parse_tree.Record_cons(loc, (pos_fields, named_fields)) ->
         (* Get record type from context. *)
