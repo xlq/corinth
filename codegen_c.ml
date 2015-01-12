@@ -44,6 +44,7 @@ and c_name_of_type s = function
     | Integer_type -> "int"
     | Named_type({sym_kind=Type_sym} as type_sym, _) -> c_name_of_type_sym s type_sym
     | Named_type({sym_kind=Type_param}, []) -> "void"
+    | Pointer_type(t) -> c_name_of_type s t ^ "*"
 
 let c_name_of_var s sym =
     match sym.sym_kind with

@@ -13,6 +13,7 @@ let present = function
     | None -> false
 
 type todo =
+    | Todo_type of Parse_tree.decl * symbol
     | Todo_proc of Parse_tree.stmt list * symbol
 
 type translation_state = {
@@ -287,20 +288,12 @@ and trans_decl ts = function
         let type_sym = create_sym ts.ts_scope loc name Type_sym in
         type_sym.sym_type <- Some other
     (* Record type declaration *)
-    | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Record_type(fields)) ->
+    | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Record_type(fields)) as decl ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let type_sym = create_sym ts.ts_scope loc name Type_sym in
         trans_type_params {ts with ts_scope = type_sym} type_params;
         type_sym.sym_type <- Some (Record_type(None)); (* TODO: base record *)
-        List.iter (fun (loc, name, ttype) ->
-            let ttype' = trans_type ts ttype in
-            match name with
-                | Some name ->
-                    check_for_duplicate_definition type_sym loc name;
-                    (create_sym type_sym loc name Var).sym_type <- Some ttype'
-                | None ->
-                    (create_sym type_sym loc "" Var).sym_type <- Some ttype'
-        ) fields
+        todo ts (Todo_type(decl, type_sym))
     | Parse_tree.Var_decl(loc, name, maybe_type, maybe_init) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let var_sym = create_sym ts.ts_scope loc name Var in
@@ -595,6 +588,22 @@ and trans_lvalue ts e =
 let finish_trans ts =
     let subs = ref [] in
     List.iter (function
+        | Todo_type(Parse_tree.Type_decl(loc, name, type_params,
+          Parse_tree.Record_type(fields)), type_sym) ->
+            let ts = {ts with ts_scope = type_sym.sym_parent} in
+            List.iter (fun (loc, name, ttype) ->
+                let ttype' = trans_type ts ttype in
+                match name with
+                    | Some name ->
+                        check_for_duplicate_definition type_sym loc name;
+                        (create_sym type_sym loc name Var).sym_type <- Some ttype'
+                    | None ->
+                        (create_sym type_sym loc "" Var).sym_type <- Some ttype'
+            ) fields
+        | Todo_proc _ -> ()
+    ) !(ts.ts_todo);
+    List.iter (function
+        | Todo_type _ -> ()
         | Todo_proc(stmts, proc_sym) ->
             let stmts' = ref [] in
             trans_stmts {ts with ts_scope = proc_sym;

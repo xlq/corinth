@@ -15,6 +15,7 @@
         "elsif",         ELSIF;
         "end",           END;
         "if",            IF;
+        "imported",      IMPORTED;
         "is",            IS;
         "loop",          LOOP;
         "override",      OVERRIDE;
