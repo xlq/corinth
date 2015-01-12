@@ -224,11 +224,13 @@ let match_args_to_params loc what params pos_args named_args =
 let rec loc_of_expr = function
     | Parse_tree.Name(loc, _)
     | Parse_tree.Int_literal(loc, _)
+    | Parse_tree.String_literal(loc, _)
     | Parse_tree.Apply(loc, _, _) -> loc
 
 let rec loc_of_iexpr = function
     | Name(loc, _) -> loc
     | Int_literal(loc, _)
+    | String_literal(loc, _)
     | Apply(loc, _, _)
     | Record_cons(loc, _, _)
     | Field_access(loc, _, _)
@@ -525,6 +527,8 @@ and trans_expr ts (target_type: ttype option) = function
         end
     | Parse_tree.Int_literal(loc, n) ->
         (Int_literal(loc, n), Integer_type)
+    | Parse_tree.String_literal(loc, s) ->
+        (String_literal(loc, s), Pointer_type(Char_type))
     | Parse_tree.Apply(loc, proc, (pos_args, named_args)) ->
         let proc, proc_type = trans_expr ts None proc in
         begin match proc_type with

@@ -37,6 +37,7 @@ rule scan = parse
   | ['A'-'Z' 'a'-'z' '_'] ['A'-'Z' 'a'-'z' '0'-'9' '_']* as id
         { try Hashtbl.find keywords id
           with Not_found -> IDENT(id) }
+  | '"' ([^ '"']* as text) '"'    { STRING(text) }
   | ['0'-'9']+ as value { INTEGER(big_int_of_string value) }
   | '('  { LPAREN }
   | ')'  { RPAREN }

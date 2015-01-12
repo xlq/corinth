@@ -110,6 +110,8 @@ and trans_iexpr s = function
         c_name_of_var s sym
     | Int_literal(loc, n) ->
         string_of_big_int n
+    | String_literal(loc, s) ->
+        "\"" ^ s ^ "\""
     | Apply(loc, proc_e, args) ->
         trans_iexpr s proc_e ^ "("
         ^ String.concat ", " (List.map (fun (param, arg) ->

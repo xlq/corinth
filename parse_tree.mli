@@ -40,6 +40,7 @@ and stmt =
 and expr =
     | Name of loc * dotted_name
     | Int_literal of loc * big_int
+    | String_literal of loc * string
     | Apply of loc * expr * expr args
     | Record_cons of loc * expr args
     | Binop of loc * expr * Symtab.binop * expr
