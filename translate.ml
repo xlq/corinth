@@ -420,17 +420,38 @@ and trans_decl ts = function
                     (* XXX: Probably need more strictness than coerce. *)
                     coerce ts loc (unsome proc_sym.sym_type) "overriding return type"
                         (unsome base_proc.sym_type);
+                    List.iter (fun tp -> tp.sym_selected <- false) (get_type_params proc_sym);
                     List.iter (function
+                        | {sym_kind=Type_param; sym_dispatching=false;
+                           sym_type=Some(Named_type({sym_kind=Type_param; sym_parent=p} as tp,[]))} when p == proc_sym ->
+                            (* type parameters of base can be unified with type parameters
+                               of derived, but only injectively. *)
+                            if tp.sym_selected then begin
+                                Errors.semantic_error (unsome tp.sym_defined)
+                                    ("Non-dispatching type parameter `" ^ tp.sym_name
+                                        ^ "' unifies with two type parameters of the dispatching procedure.")
+                                        (* XXX: Say which ones! *)
+                                        (* XXX: This is a horrible error message! I barely understand it! *)
+                            end;
+                            tp.sym_selected <- true
                         | {sym_kind=Type_param; sym_dispatching=false; sym_type=Some t; sym_name=name} ->
                             Errors.semantic_error loc
                                 ("Overriding procedure specialises non-dispatching type parameter `"
                                     ^ name ^ "' to `" ^ string_of_type t ^ "'.")
                             (* XXX: These error messages are incomprehensible. :(
                                Maybe point out which parameter should have the correct type. *)
-                        | {sym_kind=Type_param; sym_dispatching=true; sym_type=None; sym_name=name} ->
+                        | {sym_kind=Type_param; sym_dispatching=true;
+                           sym_type=None; sym_name=name} ->
                             Errors.semantic_error loc
-                                ("Overriding procedure doesn't specialise type parameter `"
+                                ("Overriding procedure doesn't specialise dispatching type parameter `"
                                     ^ name ^ "'.")
+                        | {sym_kind=Type_param; sym_dispatching=true;
+                           sym_type=Some(Named_type({sym_kind=Type_param; sym_parent=p; sym_name=name2},[]));
+                           sym_name=name} when p == proc_sym ->
+                            Errors.semantic_error loc
+                                ("Overriding procedure doesn't specialise dispatching type parameter `" ^ name
+                                 ^ (if name = name2 then "'."
+                                    else "', it just renames it to `" ^ name2 ^ "'."))
                         | {sym_kind=Type_param; sym_dispatching=true; sym_type=Some t; sym_name=name} ->
                             prerr_endline ("Procedure `" ^ name_for_error ts base_proc
                                 ^ "' specialised for type `" ^ string_of_type t ^ "'.")
