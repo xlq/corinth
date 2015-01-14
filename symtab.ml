@@ -201,5 +201,5 @@ let get_dispatch_list tp =
             List.iter (fun (tp2,loc) ->
                 collect (tp::stack) ((tp2,loc)::history) tp2) tp.sym_dispatched_to
         end
-    in List.iter (fun (tp2,loc) -> collect [] [(tp2,loc)] tp2) tp.sym_dispatched_to;
+    in collect [] [] tp;
     List.map (fun (tp,hist) -> (tp,!hist)) !result

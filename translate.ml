@@ -834,8 +834,6 @@ let finish_trans ts =
 
     done;
         
-
-
     (* XXX: Don't do this here! *)
     let c_state = Codegen_c.new_state () in
     List.iter (Codegen_c.trans_sub c_state) !subs
