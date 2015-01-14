@@ -118,6 +118,14 @@ and trans_iexpr s = function
     | Char_literal(loc, s) ->
         "'" ^ s ^ "'"
     | Apply(loc, proc_e, args) ->
+        begin
+            match proc_e with Name(_,{sym_kind=Proc;sym_locals=l}) ->
+                List.iter (function
+                    | {sym_kind=Type_param} as tp ->
+                        emit s ("/* " ^ tp.sym_name ^ " dispatches to: "
+                          ^ String.concat ", " (List.map (fun proc -> proc.sym_name) (get_dispatch_list tp)) ^ " */")
+                    | _ -> ()) l
+        end;
         trans_iexpr s proc_e ^ "("
         ^ String.concat ", " (List.map (fun (param, arg) ->
             (if is_param_by_value param then trans_iexpr s arg

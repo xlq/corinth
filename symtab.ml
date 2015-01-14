@@ -27,6 +27,7 @@ type symbol = {
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
     mutable sym_dispatching: bool; (* Proc's ttype parameter is dispatching (declared "disp") *)
+    mutable sym_dispatched_to: symbol list;
     mutable sym_base_proc: symbol option; (* Base proc for overriding proc. *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
@@ -85,6 +86,7 @@ let new_root_sym () =
         sym_type = None;
         sym_locals = [];
         sym_dispatching = false;
+        sym_dispatched_to = [];
         sym_base_proc = None;
         sym_param_mode = Const_param;
         sym_code = None;
@@ -114,6 +116,7 @@ let create_sym parent loc name kind =
         sym_type = None;
         sym_locals = [];
         sym_dispatching = false;
+        sym_dispatched_to = [];
         sym_base_proc = None;
         sym_param_mode = Const_param;
         sym_code = None;
@@ -176,3 +179,13 @@ let is_dispatching sym =
     List.exists (function
         | {sym_kind=Type_param; sym_dispatching=true} -> true
         | _ -> false) sym.sym_locals
+
+(* Return list of dispatching procedures a type parameter must be dispatchable to. *)
+let get_dispatch_list tp =
+    let rec collect all = function
+        | [] -> List.map (fun tp -> assert (tp.sym_parent.sym_kind == Proc); tp.sym_parent) all
+        | tp::rest when List.exists ((==) tp) all -> collect all rest
+        | tp::rest ->
+            assert (tp.sym_kind == Type_param);
+            collect (tp::all) (List.rev_append tp.sym_dispatched_to rest)
+    in collect [] [tp]

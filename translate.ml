@@ -21,8 +21,10 @@ type translation_state = {
     ts_scope: symbol;
     ts_todo: todo list ref;
     ts_block: istmt list ref option;
-    ts_exists: symbol list; (* list of symbols whose type parameters
-                               are existentially quantified and can be unified *)
+    (* list of symbols whose type parameters
+       are existentially quantified and can be unified, plus a function
+       to call when the unification happens. *)
+    ts_exists: (symbol * (symbol -> ttype -> unit)) list;
 }
 
 let new_translation_state root = {
@@ -34,13 +36,14 @@ let new_translation_state root = {
 }
 
 (* Mark type parameters of the given symbol as existentially quantified
-   while f is called with the translation state. *)
-let exi_quant_param ts sym f =
+   while f is called with the translation state and g tp ty is called
+   for every tp that is bound to ty. *)
+let exi_quant_param ts sym f g =
     assert (List.for_all (function
         | {sym_kind=Type_param; sym_type=None} -> true
         | {sym_kind=Type_param; sym_type=Some _} -> false
         | _ -> true) sym.sym_locals);
-    let result = f {ts with ts_exists = sym :: ts.ts_exists} in
+    let result = f {ts with ts_exists = (sym, g) :: ts.ts_exists} in
     List.iter (function
         | {sym_kind=Type_param; sym_type=Some t} as sym -> sym.sym_type <- None
         | _ -> ()) sym.sym_locals;
@@ -126,17 +129,18 @@ let reset_unifs sym =
 let unify ts loc v t =
     (* TODO: Occurs check? *)
     assert (match v.sym_type with None -> true | Some _ -> false);
-    if not (List.exists ((==) v.sym_parent) ts.ts_exists) then begin
-        Errors.semantic_error loc
-            ("Cannot use type parameter `" ^ v.sym_name
-                ^ "' as type `" ^ string_of_type t
-                ^ "' because `" ^ v.sym_name
-                ^ "' could be anything!"); (* I don't know what sensible message to put here. *)
-        raise Compile_error
-    end;
-    (*ts.ts_unifications := v :: !(ts.ts_unifications);*)
-    v.sym_type <- Some t;
-    prerr_endline ("Unifying " ^ full_name v ^ " -> " ^ string_of_type t)
+    match maybe_find (fun (vp,_) -> vp == v.sym_parent) ts.ts_exists with
+        | None ->
+            Errors.semantic_error loc
+                ("Cannot use type parameter `" ^ v.sym_name
+                    ^ "' as type `" ^ string_of_type t
+                    ^ "' because `" ^ v.sym_name
+                    ^ "' could be anything!"); (* I don't know what sensible message to put here. *)
+            raise Compile_error
+        | Some (_,f) ->
+            f v t;
+            v.sym_type <- Some t;
+            prerr_endline ("Unifying " ^ full_name v ^ " -> " ^ string_of_type t)
 
 (* Substitute type parameters for type arguments. *)
 let rec subst_tparams tparams = function
@@ -376,6 +380,7 @@ and trans_decl ts = function
         check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
         let disp_tp = trans_type_params {ts with ts_scope = proc_sym} type_params true in
+        ignore disp_tp;
         trans_params ts proc_sym params return_type;
         proc_sym.sym_imported <- true
     | Parse_tree.Proc_override(loc, name, type_params, params, return_type, body) ->
@@ -391,7 +396,7 @@ and trans_decl ts = function
                     | None -> ()
                     | Some _ ->
                         Errors.semantic_error loc
-                            ("Redispatching is not implemented.")
+                            ("Overriding procedure cannot declare a dispatching type parameter.")
                 end;
                 trans_params ts proc_sym params return_type;
                 (* Check that the overriding procedure is type-compatible with the base procedure. *)
@@ -403,64 +408,60 @@ and trans_decl ts = function
                             ^ (if List.length base_params < List.length ovrd_params then "more" else "fewer")
                             ^ " parameters than procedure `"
                             ^ name_for_error ts base_proc ^ "'.")
-                else exi_quant_param ts base_proc (fun ts ->
-                    (* Parameter types must be an instance of the base's parameter types. *)
-                    List.iter2 (fun base_param ovrd_param ->
-                        if base_param.sym_name <> ovrd_param.sym_name then
-                            Errors.semantic_error (unsome ovrd_param.sym_defined)
-                                ("Parameter name mismatch: `"
-                                    ^ ovrd_param.sym_name ^ "' should be called `"
-                                    ^ base_param.sym_name ^ "'.") else
-                        (* XXX: Probably need more strictness than coerce. *)
-                        coerce ts (unsome ovrd_param.sym_defined)
-                            (unsome base_param.sym_type) "for overriding parameter"
-                            (unsome ovrd_param.sym_type)
-                    ) base_params ovrd_params;
-                    (* Return type must also be an instance of the base's return type. *)
-                    (* XXX: Probably need more strictness than coerce. *)
-                    coerce ts loc (unsome proc_sym.sym_type) "overriding return type"
-                        (unsome base_proc.sym_type);
+                else begin
+                    let specialised_for = ref None in (* type that proc is specialised for
+                                                         (i.e. type that disp type param is unified with) *)
                     List.iter (fun tp -> tp.sym_selected <- false) (get_type_params proc_sym);
-                    List.iter (function
-                        | {sym_kind=Type_param; sym_dispatching=false;
-                           sym_type=Some(Named_type({sym_kind=Type_param; sym_parent=p} as tp,[]))} when p == proc_sym ->
-                            (* type parameters of base can be unified with type parameters
-                               of derived, but only injectively. *)
-                            if tp.sym_selected then begin
-                                Errors.semantic_error (unsome tp.sym_defined)
-                                    ("Non-dispatching type parameter `" ^ tp.sym_name
-                                        ^ "' unifies with two type parameters of the dispatching procedure.")
-                                        (* XXX: Say which ones! *)
+                    exi_quant_param ts base_proc (fun ts ->
+                        (* Parameter types must be an instance of the base's parameter types. *)
+                        List.iter2 (fun base_param ovrd_param ->
+                            if base_param.sym_name <> ovrd_param.sym_name then
+                                Errors.semantic_error (unsome ovrd_param.sym_defined)
+                                    ("Parameter name mismatch: `"
+                                        ^ ovrd_param.sym_name ^ "' should be called `"
+                                        ^ base_param.sym_name ^ "'.") else
+                            (* XXX: Probably need more strictness than coerce. *)
+                            coerce ts (unsome ovrd_param.sym_defined)
+                                (unsome base_param.sym_type) "for overriding parameter"
+                                (unsome ovrd_param.sym_type)
+                        ) base_params ovrd_params;
+                        (* Return type must also be an instance of the base's return type. *)
+                        (* XXX: Probably need more strictness than coerce. *)
+                        coerce ts loc (unsome proc_sym.sym_type) "overriding return type"
+                            (unsome base_proc.sym_type)
+                    ) (fun v t ->
+                        assert (v.sym_kind == Type_param);
+                        if v.sym_dispatching then begin
+                            match t with
+                                | Named_type({sym_kind=Type_param; sym_parent=p; sym_name=new_name}, _) when p == proc_sym ->
+                                    Errors.semantic_error loc
+                                        ("Overriding procedure doesn't specialise dispatching type parameter `" ^ v.sym_name
+                                         ^ (if v.sym_name = new_name then "'."
+                                            else "', it just renames it to `" ^ new_name ^ "'."))
+                                | _ -> specialised_for := Some t
+                        end else begin
+                            (* Non-dispatching type params can't introduce constraints,
+                               so there should be a mapping from overriding type params
+                               to base params. *)
+                            match t with
+                                | Named_type({sym_kind=Type_param; sym_parent=p; sym_name=new_name} as tp, _) when p == proc_sym ->
+                                    if tp.sym_selected then begin
+                                        Errors.semantic_error loc
+                                            ("Overriding procedure constrains non-dispatching type parameter `"
+                                             ^ v.sym_name ^ "' through `" ^ new_name ^ "'.")
+                                        (* XXX: Say other type parameter name! *)
                                         (* XXX: This is a horrible error message! I barely understand it! *)
-                            end;
-                            tp.sym_selected <- true
-                        | {sym_kind=Type_param; sym_dispatching=false; sym_type=Some t; sym_name=name} ->
-                            Errors.semantic_error loc
-                                ("Overriding procedure specialises non-dispatching type parameter `"
-                                    ^ name ^ "' to `" ^ string_of_type t ^ "'.")
-                            (* XXX: These error messages are incomprehensible. :(
-                               Maybe point out which parameter should have the correct type. *)
-                        | {sym_kind=Type_param; sym_dispatching=true;
-                           sym_type=None; sym_name=name} ->
-                            Errors.semantic_error loc
-                                ("Overriding procedure doesn't specialise dispatching type parameter `"
-                                    ^ name ^ "'.")
-                        | {sym_kind=Type_param; sym_dispatching=true;
-                           sym_type=Some(Named_type({sym_kind=Type_param; sym_parent=p; sym_name=name2},[]));
-                           sym_name=name} when p == proc_sym ->
-                            Errors.semantic_error loc
-                                ("Overriding procedure doesn't specialise dispatching type parameter `" ^ name
-                                 ^ (if name = name2 then "'."
-                                    else "', it just renames it to `" ^ name2 ^ "'."))
-                        | {sym_kind=Type_param; sym_dispatching=true; sym_type=Some t; sym_name=name} ->
-                            prerr_endline ("Procedure `" ^ name_for_error ts base_proc
-                                ^ "' specialised for type `" ^ string_of_type t ^ "'.")
-                        | _ -> ()
-                    ) (get_type_params base_proc)
-                )
+                                    end;
+                                    tp.sym_selected <- true
+                                | _ ->
+                                    Errors.semantic_error loc
+                                        ("Overriding procedure specialises non-dispatching type parameter `"
+                                         ^ v.sym_name ^ "'.")
+                        end
+                    )
+                end
             | bad_sym -> wrong_sym_kind ts loc bad_sym "dispatching procedure"
         end
-
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Type_alias(other)) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let other = trans_type ts other in
@@ -716,8 +717,10 @@ and trans_expr ts (target_type: ttype option) = function
         begin match proc_type with
             | Proc_type(proc_sym) ->
                 (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
+                prerr_endline ("Calling " ^ proc_sym.sym_name);
                 exi_quant_param ts proc_sym (fun ts ->
                     let matched_args =
+                        (* Match arguments to parameters and coerce types. *)
                         List.map (fun (param, arg) ->
                             assert (present param.sym_type);
                             let arg, arg_type, lvalue = trans_expr ts param.sym_type arg in
@@ -739,6 +742,13 @@ and trans_expr ts (target_type: ttype option) = function
                             (get_params proc_sym) pos_args named_args) in
                     (Apply(loc, proc, matched_args),
                      follow_tparams (unsome proc_sym.sym_type) (* return type *), false)
+                ) (fun v t ->
+                    match t with
+                        | Named_type({sym_kind=Type_param} as tp, []) ->
+                            (* XXX: There will probably be tp.sym_parent != ts.ts_scope cases in the future. *)
+                            assert (tp.sym_parent == ts.ts_scope);
+                            tp.sym_dispatched_to <- v :: tp.sym_dispatched_to
+                        | _ -> ()
                 )
         end
     | Parse_tree.Record_cons(loc, (pos_fields, named_fields)) ->
