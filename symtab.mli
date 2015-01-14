@@ -27,8 +27,9 @@ type symbol = {
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
     mutable sym_dispatching: bool; (* Proc's ttype parameter is dispatching (declared "disp") *)
     (* List of type parameters this type parameter gets passed to. *)
-    mutable sym_dispatched_to: symbol list;
+    mutable sym_dispatched_to: (symbol * loc) list;
     mutable sym_base_proc: symbol option; (* Base proc for overriding proc. *)
+    mutable sym_overrides: (symbol * ttype) list; (* Currently known overrides (XXX: does not obey any scope rules!) *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: bool;
@@ -53,7 +54,7 @@ and ttype =
     | Proc_type of symbol
 
 and istmt =
-    | Call of loc * iexpr * (symbol * iexpr) list
+    | Call of loc * iexpr * (symbol * iexpr) list * (symbol * ttype) list
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
     | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
@@ -64,7 +65,8 @@ and iexpr =
     | Int_literal of loc * big_int
     | String_literal of loc * string
     | Char_literal of loc * string
-    | Apply of loc * iexpr * (symbol * iexpr) list
+    | Apply of loc * iexpr * (symbol * iexpr) list (* parameter bindings *)
+                           * (symbol * ttype) list (* type parameter bindings *)
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
@@ -80,4 +82,4 @@ val string_of_type : ttype -> string
 val sym_is_grandchild : symbol -> symbol -> bool
 val full_name : symbol -> string
 val is_dispatching : symbol -> bool
-val get_dispatch_list : symbol -> symbol list
+val get_dispatch_list : symbol -> (symbol * (symbol * loc) list) list

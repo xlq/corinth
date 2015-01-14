@@ -74,8 +74,8 @@ let is_param_by_value param_sym =
         | Const_param -> is_scalar (unsome param_sym.sym_type)
 
 let rec trans_istmt s = function
-    | Call(loc, proc_e, args) ->
-        emit s (trans_iexpr s (Apply(loc, proc_e, args)) ^ ";")
+    | Call(loc, proc_e, args, tbinds) ->
+        emit s (trans_iexpr s (Apply(loc, proc_e, args, tbinds)) ^ ";")
     | Assign(loc, dest, src) ->
         emit s (trans_iexpr s dest ^ " = " ^ trans_iexpr s src ^ ";")
     | Return(loc, None) ->
@@ -117,13 +117,13 @@ and trans_iexpr s = function
         "\"" ^ s ^ "\""
     | Char_literal(loc, s) ->
         "'" ^ s ^ "'"
-    | Apply(loc, proc_e, args) ->
+    | Apply(loc, proc_e, args, tbinds) ->
         begin
             match proc_e with Name(_,{sym_kind=Proc;sym_locals=l}) ->
                 List.iter (function
                     | {sym_kind=Type_param} as tp ->
                         emit s ("/* " ^ tp.sym_name ^ " dispatches to: "
-                          ^ String.concat ", " (List.map (fun proc -> proc.sym_name) (get_dispatch_list tp)) ^ " */")
+                          ^ String.concat ", " (List.map (fun (proc,_) -> proc.sym_name) (get_dispatch_list tp)) ^ " */")
                     | _ -> ()) l
         end;
         trans_iexpr s proc_e ^ "("
@@ -225,8 +225,8 @@ and declare_prerequisites s = function
             List.iter (declare_prereq_stmt s) (unsome proc_sym.sym_code)
 
 and declare_prereq_stmt s = function
-    | Call(loc, f, args) ->
-        declare_prereq_expr s (Apply(loc, f, args))
+    | Call(loc, f, args, tbinds) ->
+        declare_prereq_expr s (Apply(loc, f, args, tbinds))
     | Assign(loc, a, b) ->
         declare_prereq_expr s a;
         declare_prereq_expr s b
@@ -251,7 +251,7 @@ and declare_prereq_expr s = function
     | Int_literal _ -> ()
     | String_literal _ -> ()
     | Char_literal _ -> ()
-    | Apply(loc, f, args) ->
+    | Apply(loc, f, args, _) ->
         declare_prereq_expr s f;
         List.iter (fun (param,arg) ->
             declare_prereq_expr s arg

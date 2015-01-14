@@ -27,8 +27,9 @@ type symbol = {
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
     mutable sym_dispatching: bool; (* Proc's ttype parameter is dispatching (declared "disp") *)
-    mutable sym_dispatched_to: symbol list;
+    mutable sym_dispatched_to: (symbol * loc) list;
     mutable sym_base_proc: symbol option; (* Base proc for overriding proc. *)
+    mutable sym_overrides: (symbol * ttype) list; (* Currently known overrides (XXX: does not obey any scope rules!) *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: bool;
@@ -53,7 +54,7 @@ and ttype =
     | Proc_type of symbol
 
 and istmt =
-    | Call of loc * iexpr * (symbol * iexpr) list
+    | Call of loc * iexpr * (symbol * iexpr) list * (symbol * ttype) list
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
     | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
@@ -64,7 +65,8 @@ and iexpr =
     | Int_literal of loc * big_int
     | String_literal of loc * string
     | Char_literal of loc * string
-    | Apply of loc * iexpr * (symbol * iexpr) list
+    | Apply of loc * iexpr * (symbol * iexpr) list (* parameter bindings *)
+                           * (symbol * ttype) list (* type parameter bindings *)
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
@@ -88,6 +90,7 @@ let new_root_sym () =
         sym_dispatching = false;
         sym_dispatched_to = [];
         sym_base_proc = None;
+        sym_overrides = [];
         sym_param_mode = Const_param;
         sym_code = None;
         sym_imported = false;
@@ -118,6 +121,7 @@ let create_sym parent loc name kind =
         sym_dispatching = false;
         sym_dispatched_to = [];
         sym_base_proc = None;
+        sym_overrides = [];
         sym_param_mode = Const_param;
         sym_code = None;
         sym_imported = false;
@@ -180,12 +184,22 @@ let is_dispatching sym =
         | {sym_kind=Type_param; sym_dispatching=true} -> true
         | _ -> false) sym.sym_locals
 
-(* Return list of dispatching procedures a type parameter must be dispatchable to. *)
+(* Return list of dispatching procedures a type parameter must be dispatchable to.
+   Each dispatching procedure is paired with the chain of type parameters followed
+   to find where the dispatching procedure is needed. *)
 let get_dispatch_list tp =
-    let rec collect visited all = function
-        | [] -> all
-        | tp::rest when List.exists ((==) tp) visited -> collect visited all rest
-        | tp::rest ->
-            assert (tp.sym_kind == Type_param);
-            collect (tp::visited) (tp.sym_parent::all) (List.rev_append tp.sym_dispatched_to rest)
-    in collect [] [] tp.sym_dispatched_to
+    let result = ref [] in
+    let rec collect stack history tp =
+        if List.exists ((==) tp) stack then () else begin
+            begin match maybe_find (fun (proc,_) -> proc == tp.sym_parent) !result with
+                | Some (_,history0) ->
+                    if List.length history < List.length !history0 then
+                        history0 := history
+                | None ->
+                    result := (tp.sym_parent, ref history) :: !result
+            end;
+            List.iter (fun (tp2,loc) ->
+                collect (tp::stack) ((tp2,loc)::history) tp2) tp.sym_dispatched_to
+        end
+    in List.iter (fun (tp2,loc) -> collect [] [(tp2,loc)] tp2) tp.sym_dispatched_to;
+    List.map (fun (tp,hist) -> (tp,!hist)) !result
