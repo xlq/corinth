@@ -156,7 +156,12 @@ let rec type_check ts loc t1 t2 =
         | t1, t2 when t1 == t2 -> () (* short-cut if the types are exactly the same *)
         | No_type, No_type -> ()
         | Pointer_type(t1), Pointer_type(t2) -> type_check ts loc t1 t2
-        | Named_type(s1, []), Named_type(s2, []) when s1 == s2 -> () (* same symbol *)
+        | Named_type(s1, params1), Named_type(s2, params2) when s1 == s2 ->
+            (* Same symbol. Type params must match too. *)
+            List.iter2 (fun (param1, t1) (param2, t2) ->
+                assert (param1 == param2);
+                type_check ts loc t1 t2
+            ) params1 params2
 
         (* Type parameters. *)
         | Named_type({sym_kind=Type_param; sym_type=Some t1}, []), t2
@@ -663,7 +668,6 @@ and trans_expr ts (target_type: ttype option) = function
         begin match proc_type with
             | Proc_type(proc_sym) ->
                 (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
-                prerr_endline ("Calling " ^ proc_sym.sym_name);
                 let tp_bindings = ref [] in
                 exi_quant_param ts proc_sym (fun ts ->
                     let matched_args =
@@ -812,8 +816,11 @@ let finish_trans ts =
                             List.iter (fun (proc2, hist) ->
                                 if is_dispatching proc2 && proc2.sym_abstract then begin
                                     if not (List.exists (fun (ovrd_proc, ty') ->
-                                        try type_check ts(*?*) loc ty ty'; true
-                                        with Type_mismatch -> false
+                                        (* XXX: Need to apply tbinds here? *)
+                                        exi_quant_param ts(*?*) ovrd_proc (fun ts ->
+                                            try type_check ts loc ty ty'; true
+                                            with Type_mismatch -> false
+                                        ) (fun _ _ -> ())
                                     ) proc2.sym_overrides) then begin
                                         Errors.semantic_error loc
                                             ("Dispatching procedure `" ^ name_for_error ts proc2
