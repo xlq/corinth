@@ -182,10 +182,10 @@ let is_dispatching sym =
 
 (* Return list of dispatching procedures a type parameter must be dispatchable to. *)
 let get_dispatch_list tp =
-    let rec collect all = function
-        | [] -> List.map (fun tp -> assert (tp.sym_parent.sym_kind == Proc); tp.sym_parent) all
-        | tp::rest when List.exists ((==) tp) all -> collect all rest
+    let rec collect visited all = function
+        | [] -> all
+        | tp::rest when List.exists ((==) tp) visited -> collect visited all rest
         | tp::rest ->
             assert (tp.sym_kind == Type_param);
-            collect (tp::all) (List.rev_append tp.sym_dispatched_to rest)
-    in collect [] [tp]
+            collect (tp::visited) (tp.sym_parent::all) (List.rev_append tp.sym_dispatched_to rest)
+    in collect [] [] tp.sym_dispatched_to
