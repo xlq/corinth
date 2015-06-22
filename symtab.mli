@@ -76,6 +76,7 @@ val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)
 val create_sym : symbol -> loc -> string -> sym_kind -> symbol
 val get_type_params : symbol -> symbol list
+val get_dispatching_type_param : symbol -> symbol
 val get_fields : symbol -> symbol list (* get record fields, including from base type *)
 val get_params : symbol -> symbol list (* get proc parameters *)
 val string_of_type : ttype -> string
@@ -83,3 +84,4 @@ val sym_is_grandchild : symbol -> symbol -> bool
 val full_name : symbol -> string
 val is_dispatching : symbol -> bool
 val get_dispatch_list : symbol -> (symbol * (symbol * loc) list) list
+val iter_type_params_in : (symbol -> unit) -> ttype -> unit (* call function for each type parameter in type *)

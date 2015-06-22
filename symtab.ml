@@ -137,6 +137,9 @@ let create_sym parent loc name kind =
 let get_type_params sym =
     List.filter (fun sym -> sym.sym_kind = Type_param) sym.sym_locals
 
+let get_dispatching_type_param sym =
+    List.find (function {sym_kind=Type_param; sym_dispatching=true} -> true | _ -> false) sym.sym_locals
+
 let rec get_fields sym =
     match sym with
         | {sym_kind=Type_sym; sym_type=Some(Record_type(base)); sym_locals=fields} ->
@@ -186,7 +189,8 @@ let is_dispatching sym =
 
 (* Return list of dispatching procedures a type parameter must be dispatchable to.
    Each dispatching procedure is paired with the chain of type parameters followed
-   to find where the dispatching procedure is needed. *)
+   to find where the dispatching procedure is needed.
+   XXX: This includes the procedure that tp belongs to. Should it? *)
 let get_dispatch_list tp =
     let result = ref [] in
     let rec collect stack history tp =
@@ -203,3 +207,10 @@ let get_dispatch_list tp =
         end
     in collect [] [] tp;
     List.map (fun (tp,hist) -> (tp,!hist)) !result
+
+let rec iter_type_params_in f = function
+    | No_type | Boolean_type | Integer_type | Char_type -> ()
+    | Named_type({sym_kind=Type_param} as tp, []) -> f tp
+    | Named_type(_, args) -> List.iter (fun (_, t) -> iter_type_params_in f t) args
+    | Pointer_type t -> iter_type_params_in f t
+    | Record_type _ | Proc_type _ -> ()

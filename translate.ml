@@ -15,6 +15,7 @@ let present = function
 type todo =
     | Todo_type of Parse_tree.decl * symbol
     | Todo_proc of Parse_tree.stmt list * symbol
+    | Todo_abstract_proc of symbol
     | Todo_apply_check of iexpr
     (* XXX: Dependency graph? *)
 
@@ -111,6 +112,21 @@ let exi_quant_param ts sym (f: translation_state -> 'a) (g: symbol -> ttype -> u
         let result = f {ts with ts_exi_quants = (sym, g) :: ts.ts_exi_quants} in
         cleanup (); result
     with e -> cleanup (); raise e
+
+(* Sort binding list into original key order (physical comparison).
+   keys - original order of keys
+   bindings - list of (key, value) bindings *)
+let sort_bindings keys bindings =
+    let rec process result = function
+        | [], [], [] -> List.rev result
+        | [], _, _ -> raise (Failure "sort_bindings (too few keys)")
+        | k::keys, checked, (k',v')::remaining when k == k' ->
+            process ((k',v')::result) (keys, [], (List.rev_append checked remaining))
+        | k::keys, checked, (k',v')::remaining ->
+            process result (k::keys, (k',v')::checked, remaining)
+        | k::keys, checked, [] ->
+            raise (Failure "sort_bindings (too many/wrong keys)")
+    in process [] (keys, [], bindings)
 
 (* Substitute type parameters for type arguments. *)
 let rec subst_tparams tparams = function
@@ -320,7 +336,8 @@ and trans_decl ts = function
             | Some body -> todo ts (Todo_proc(body, proc_sym))
             | None ->
                 begin match disp_tp with
-                    | Some _ -> ()
+                    | Some _ ->
+                        todo ts (Todo_abstract_proc proc_sym)
                     | None ->
                         Errors.semantic_error loc
                             ("Non-dispatching procedure cannot be abstract.")
@@ -374,6 +391,22 @@ and trans_decl ts = function
                                 (unsome base_param.sym_type) "for overriding parameter"
                                 (unsome ovrd_param.sym_type)
                         ) base_params ovrd_params;
+                        let dispatching_tp = get_dispatching_type_param base_proc in
+                        iter_type_params_in (fun tp ->
+                            if tp == dispatching_tp then begin
+                                (* occurs check fail! *)
+                                assert false
+                            end else begin
+                                if tp.sym_selected then begin
+                                    Errors.semantic_error loc
+                                        ("Overriding procedure constrains non-dispatching type parameter `"
+                                            ^ tp.sym_name ^ "' by overriding with type `"
+                                            ^ string_of_type (unsome dispatching_tp.sym_type) ^ "'.")
+                                    (* XXX: Say other type parameter name! *)
+                                    (* XXX: This is a horrible error message! I barely understand it! *)
+                                end
+                            end
+                        ) (unsome dispatching_tp.sym_type);
                         (* Return type must also be an instance of the base's return type. *)
                         (* XXX: Probably need more strictness than coerce. *)
                         expect_type ts loc (unsome proc_sym.sym_type) "overriding return type"
@@ -396,20 +429,14 @@ and trans_decl ts = function
                                to base params. *)
                             match t with
                                 | Named_type({sym_kind=Type_param; sym_parent=p; sym_name=new_name} as tp, _) when p == proc_sym ->
-                                    if tp.sym_selected then begin
-                                        Errors.semantic_error loc
-                                            ("Overriding procedure constrains non-dispatching type parameter `"
-                                             ^ v.sym_name ^ "' through `" ^ new_name ^ "'.")
-                                        (* XXX: Say other type parameter name! *)
-                                        (* XXX: This is a horrible error message! I barely understand it! *)
-                                    end;
                                     tp.sym_selected <- true
                                 | _ ->
                                     Errors.semantic_error loc
                                         ("Overriding procedure specialises non-dispatching type parameter `"
                                          ^ v.sym_name ^ "'.")
                         end
-                    )
+                    );
+                    todo ts (Todo_proc(body, proc_sym))
                 end
             | bad_sym -> wrong_sym_kind ts loc bad_sym "dispatching procedure"
         end
@@ -691,8 +718,10 @@ and trans_expr ts (target_type: ttype option) = function
                             (param, arg)
                         ) (match_args_to_params loc "arguments"
                             (get_params proc_sym) pos_args named_args) in
-                    todo ts (Todo_apply_check(Apply(loc, proc, matched_args, !tp_bindings)));
-                    (Apply(loc, proc, matched_args, !tp_bindings),
+                    (* Sort tp_bindings into original order. *)
+                    let tp_bindings = sort_bindings (get_type_params proc_sym) !tp_bindings in
+                    todo ts (Todo_apply_check(Apply(loc, proc, matched_args, tp_bindings)));
+                    (Apply(loc, proc, matched_args, tp_bindings),
                      follow_tparams (unsome proc_sym.sym_type) (* return type *), false)
                 ) (fun v t ->
                     tp_bindings := (v, t) :: !tp_bindings;
@@ -802,6 +831,8 @@ let finish_trans ts =
                 proc_sym.sym_code <- Some !stmts';
                 subs := proc_sym :: !subs;
                 proc_sym.sym_translated <- true
+            | Todo_abstract_proc proc_sym ->
+                subs := proc_sym :: !subs
             | _ -> ()
         ) items;
         List.iter (function
@@ -823,8 +854,8 @@ let finish_trans ts =
                                         ) (fun _ _ -> ())
                                     ) proc2.sym_overrides) then begin
                                         Errors.semantic_error loc
-                                            ("Dispatching procedure `" ^ name_for_error ts proc2
-                                             ^ "' must be defined for type `"
+                                            ("Abstract dispatching procedure `" ^ name_for_error ts proc2
+                                             ^ "' must be overridden for type `"
                                              ^ string_of_type ty ^ "'.");
                                         List.iter (fun (tp',loc) ->
                                             Errors.semantic_error loc
