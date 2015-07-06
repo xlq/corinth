@@ -9,22 +9,29 @@ type 'a args =
 type unit_decl =
     | Unit of loc * dotted_name * decl list
 
-and type_param = loc * string * bool (* dispatching? *)
+and type_param = loc * string
+and constrained_type_params = type_param list * tconstraint list
+and tconstraint = loc * dotted_name * ttype args
 
 and decl =
     | Type_decl of loc * string * type_param list * type_defn
     | Var_decl of loc * string * ttype option * expr option
-    | Proc_decl of loc * string * type_param list * param list * ttype option
-            * stmt list option (* None if procedure is abstract *)
+    | Proc_decl of loc * string * constrained_type_params * param list
+        * ttype option (* return type *)
+        * dotted_name option (* implements *)
+        * stmt list
     | Proc_import of loc * string * type_param list * param list * ttype option
-    | Proc_override of loc * dotted_name * type_param list * param list * ttype option * stmt list
     | Const_decl of loc * string * expr
+    | Class_decl of loc * string * type_param list * class_item list
 
 and type_defn =
     | Type_alias of ttype
     | Record_type of (loc * string option * ttype) list
 
 and param = loc * string * ttype option * Symtab.param_mode
+
+and class_item =
+    | Class_proc of loc * string * constrained_type_params * param list * ttype option
 
 and ttype =
     | Boolean_type

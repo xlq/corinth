@@ -9,6 +9,8 @@ type sym_kind =
     | Unit
     | Var (* variable or field *)
     | Proc
+    | Class
+    | Class_proc
     | Type_sym
     | Type_param
     | Param
@@ -25,11 +27,8 @@ type symbol = {
        Type_param -> sym_type is what the type parameter is currently unified with. *)
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
-    mutable sym_dispatching: bool; (* Proc's ttype parameter is dispatching (declared "disp") *)
-    (* List of type parameters this type parameter gets passed to. *)
-    mutable sym_dispatched_to: (symbol * loc) list;
-    mutable sym_base_proc: symbol option; (* Base proc for overriding proc. *)
-    mutable sym_overrides: (symbol * ttype) list; (* Currently known overrides (XXX: does not obey any scope rules!) *)
+    mutable sym_tconstraints: (symbol (* Class *) * tbinds) list; (* type parameter constraints *)
+    mutable sym_implementations: symbol list; (* List of Proc for Class_proc symbol (XXX: SCOPING RULES!) *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: bool;
@@ -48,13 +47,16 @@ and ttype =
     | Boolean_type
     | Integer_type  (* This is temporary, for development *)
     | Char_type
-    | Named_type of symbol * (symbol * ttype) list
+    | Named_type of symbol * tbinds
     | Pointer_type of ttype
     | Record_type of symbol option
-    | Proc_type of symbol
+    | Proc_type of symbol * tbinds
+
+and tbinds = (symbol * ttype) list
 
 and istmt =
-    | Call of loc * iexpr * (symbol * iexpr) list * (symbol * ttype) list
+    | Call of loc * iexpr * (symbol * iexpr) list * tbinds
+            * (symbol * (symbol * symbol) list) list ref
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
     | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
@@ -65,23 +67,23 @@ and iexpr =
     | Int_literal of loc * big_int
     | String_literal of loc * string
     | Char_literal of loc * string
+    | Dispatch of int (* index in sym_tconstraints *) * symbol * tbinds (* - XXX: needed? *)
     | Apply of loc * iexpr * (symbol * iexpr) list (* parameter bindings *)
-                           * (symbol * ttype) list (* type parameter bindings *)
+                           * tbinds (* type parameter bindings (XXX: needed?) *)
+                           * (symbol * (symbol * symbol) list) list ref (* classes *)
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
     | Deref of loc * iexpr
 
+val is_kind : sym_kind -> symbol -> bool
 val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)
 val create_sym : symbol -> loc -> string -> sym_kind -> symbol
 val get_type_params : symbol -> symbol list
-val get_dispatching_type_param : symbol -> symbol
 val get_fields : symbol -> symbol list (* get record fields, including from base type *)
 val get_params : symbol -> symbol list (* get proc parameters *)
 val string_of_type : ttype -> string
 val sym_is_grandchild : symbol -> symbol -> bool
 val full_name : symbol -> string
-val is_dispatching : symbol -> bool
-val get_dispatch_list : symbol -> (symbol * (symbol * loc) list) list
 val iter_type_params_in : (symbol -> unit) -> ttype -> unit (* call function for each type parameter in type *)

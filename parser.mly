@@ -21,12 +21,12 @@
 %token <string> CHARLIT
 
 /* Keywords */
-%token ABSTRACT CONST DISP ELSE ELSIF END IF IMPORTED IS LOOP OUT OVERRIDING PROC RETURN THEN
+%token CLASS CONST ELSE ELSIF END IF IMPLEMENTS IMPORTED IS LOOP OUT OVERRIDING PROC RETURN THEN
 %token TYPE UNIT VAR WHILE WITH
 
 
 %token LPAREN RPAREN LBRACE RBRACE QUESTION COLON SEMICOLON DOT COMMA STAR
-%token ASSIGN DOTDOT EQ NE LT GT LE GE ARROW PLUS DASH SLASH CARET
+%token ASSIGN DOTDOT EQ NE LT GT LE GE ARROW PLUS DASH SLASH CARET MID
 
 %token EOF
 
@@ -87,31 +87,46 @@ decl:
         { Type_decl(loc(), $2, $3, $5) }
     | VAR IDENT opt_type opt_init SEMICOLON
         { Var_decl(loc(), $2, $3, $4) }
-    | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS proc_body END IDENT SEMICOLON
-        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 11, $11);
-          Proc_decl(loc(), $2, $3, $5, $7, Some $9) }
-    | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS ABSTRACT SEMICOLON
-        { Proc_decl(loc(), $2, $3, $5, $7, None) }
-    | OVERRIDING PROC dotted_name opt_type_params LPAREN params RPAREN opt_type IS proc_body END IDENT SEMICOLON
-        { check_end (rhs_start_pos 3, last $3) (rhs_start_pos 12, $12);
-          Proc_override(loc(), $3, $4, $6, $8, $10) }
-    | PROC IDENT opt_type_params LPAREN params RPAREN opt_type IS IMPORTED SEMICOLON
-        { Proc_import(loc(), $2, $3, $5, $7) }
+    | PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type opt_implements IS proc_body END IDENT SEMICOLON
+        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 12, $12);
+          Proc_decl(loc(), $2, $3, $5, $7, $8, $10) }
+    /*| PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type IS IMPORTED SEMICOLON
+        { Proc_import(loc(), $2, $3, $5, $7) }*/
     | CONST IDENT ASSIGN expr SEMICOLON
         { Const_decl(loc(), $2, $4) }
+    | CLASS IDENT LT type_params GT IS class_contents END IDENT SEMICOLON
+        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 9, $9);
+          Class_decl(loc(), $2, $4, $7) }
 
 opt_type_params:
     | /* empty */ { [] }
     | LT type_params GT { $2 }
+opt_constrained_type_params:
+    | /* empty */ { ([], []) }
+    | LT type_params opt_constraints GT { ($2, $3) }
 type_params:
     | /* empty */ { [] }
     | type_param { [$1] }
     | type_param COMMA type_params { $1::$3 }
 type_param:
-    | opt_disp IDENT { (loc(), $2, $1) }
-opt_disp:
-    | /* empty */ { false }
-    | DISP { true }
+    | IDENT { (loc(), $1) }
+opt_constraints:
+    | /* empty */ { [] }
+    | MID constraint_list { $2 }
+constraint_list:
+    | tconstraint { [$1] }
+    | tconstraint COMMA constraint_list { $1::$3 }
+tconstraint:
+    | dotted_name LT type_args GT { (loc(), $1, $3) }
+opt_implements:
+    | /* empty */ { None }
+    | IMPLEMENTS dotted_name { Some $2 }
+class_contents:
+    | /* empty */ { [] }
+    | class_item class_contents { $1::$2 }
+class_item:
+    | PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type SEMICOLON
+    { Class_proc(loc(), $2, $3, $5, $7) }
 
 opt_init:
     | /* empty */ { None }

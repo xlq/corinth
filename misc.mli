@@ -8,6 +8,7 @@ val unsome : 'a option -> 'a
 val times : int -> string -> string
 
 val maybe_find : ('a -> bool) -> 'a list -> 'a option
+val maybe_assq : 'a -> ('a * 'b) list -> 'b option
 
 (* enumerate [a;b;c] = [(0,a); (1,b); (2,c)] *)
 val enumerate : 'a list -> (int * 'a) list

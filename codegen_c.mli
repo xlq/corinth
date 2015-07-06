@@ -1,4 +1,4 @@
 type state
 
-val new_state : unit -> state
-val trans_sub : state -> Symtab.symbol -> unit
+val new_state : Symtab.symbol -> state
+val translate : state -> Symtab.symbol -> unit

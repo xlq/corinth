@@ -8,13 +8,13 @@
         tbl
 
     let keywords = create_hashtable [
-        "abstract",      ABSTRACT;
+        "class",         CLASS;
         "const",         CONST;
-        "disp",          DISP;
         "else",          ELSE;
         "elsif",         ELSIF;
         "end",           END;
         "if",            IF;
+        "implements",    IMPLEMENTS;
         "imported",      IMPORTED;
         "is",            IS;
         "loop",          LOOP;
@@ -55,6 +55,7 @@ rule scan = parse
   | '-'  { DASH }
   | '*'  { STAR }
   | '/'  { SLASH }
+  | '|'  { MID }
   | ":=" { ASSIGN }
   | ".." { DOTDOT }
   | '='  { EQ }

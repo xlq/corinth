@@ -4,21 +4,69 @@ open Misc
 
 type state = {
     s_output: out_channel;
-    s_indent: int;
+    s_scope: symbol;                (* scope that this state is for *)
+    s_outer: state;                 (* state corresponding to next wider scope (widest scope points to self) *)
+    s_scope_indent: int;            (* indent level of this scope *)
+    mutable s_current_indent: int;  (* current indent level *)
+    mutable s_lines: string list;   (* lines of C code (reverse order) *)
 }
 
-let emit s line = output_string s.s_output (times s.s_indent "    " ^ line ^ "\n")
+let indent s f =
+    s.s_current_indent <- s.s_current_indent + 1;
+    let result = try f s
+        with e -> s.s_current_indent <- s.s_current_indent - 1; raise e
+    in
+    s.s_current_indent <- s.s_current_indent - 1;
+    result
 
-let indent s = {s with s_indent = s.s_indent + 1}
-
-let new_state () =
-    let s = {
-        s_output = stdout;
-        s_indent = 0;
+let open_scope s scope f =
+    let appropriate_state =
+        let rec find_appropriate s =
+            if s.s_scope == scope.sym_parent then s (* correct scope *)
+            else if s.s_outer != s then find_appropriate s.s_outer (* try outer scope *)
+            else s (* in another unit - use outermost (file) scope *)
+        in find_appropriate s
+    in
+    (* Create new state for accumulating lines. *)
+    let new_state = {
+        s_output = s.s_output;
+        s_scope = scope;
+        s_outer = appropriate_state;
+        s_scope_indent = appropriate_state.s_scope_indent + 1;
+        s_current_indent = appropriate_state.s_scope_indent + 1; (* not an error - we start again at the indentation level of the parent scope *)
+        s_lines = [];
     } in
-    emit s "#include <stdbool.h>";
-    emit s "#include \"rt/dispatch.h\"";
-    emit s "";
+    let result = f new_state in (* if it fails, we discard the lines it produced *)
+    let lines = new_state.s_lines in
+    let lines = (*match lines with
+        | _::_::_ -> ""::lines (* append blank line if more than one line *)
+        | _ -> lines *) ""::lines
+    in
+
+    if appropriate_state.s_outer == appropriate_state then begin
+        (* Safe to output. *)
+        List.iter (fun line ->
+            output_string s.s_output (line ^ "\n")
+        ) (List.rev lines)
+    end else begin
+        appropriate_state.s_lines <- (*appropriate_state.s_lines @ new_state.s_lines*)
+            new_state.s_lines @ appropriate_state.s_lines
+    end;
+    result
+
+let emit s line =
+    s.s_lines <- (times s.s_current_indent "    " ^ line)::s.s_lines
+
+let new_state root =
+    let rec s = {
+        s_output = stdout;
+        s_scope = root;
+        s_outer = s;
+        s_scope_indent = -1;
+        s_current_indent = 0;
+        s_lines = [];
+    } in
+    open_scope s root (fun s -> emit s "#include <stdbool.h>");
     s
 
 let rec dotted_name_of_sym sym =
@@ -30,41 +78,15 @@ let c_name_of_dotted_name parts =
 
 let c_name_of_local sym = String.lowercase sym.sym_name
 
-let rec mangle_type = function
-    | Boolean_type -> "bool"
-    | Integer_type -> "int"
-    | Char_type -> "char"
-    | Named_type({sym_kind=Type_sym} as type_sym, targs) ->
-        type_sym.sym_name ^ "__"
-            ^ String.concat "__" (List.map mangle_type (List.map snd targs))
-    | Named_type({sym_kind=Type_param} as tp, []) ->
-        c_name_of_type_param tp
-    | Pointer_type(t) -> "P" ^ mangle_type t
-    | t -> raise (Failure ("cannot mangle `" ^ string_of_type t ^ "'."))
-
-and c_name_of_sym sym =
+let rec c_name_of_sym sym =
     match sym with
         | {sym_kind=Proc; sym_imported=true} -> sym.sym_name
-        | {sym_kind=Proc; sym_base_proc=Some base_proc} ->
-            assert (sym.sym_name = "");
-            c_name_of_sym sym.sym_parent ^ "__" ^ String.lowercase base_proc.sym_name
-            ^ "__FOR__" ^ mangle_type (List.assq sym base_proc.sym_overrides)
         | _ -> c_name_of_dotted_name (dotted_name_of_sym sym)
 
 and c_name_of_type_sym sym =
     match sym with
         | {sym_kind=Type_sym; sym_type=Some (Record_type _)} ->
             "struct " ^ c_name_of_sym sym
-        | {sym_kind=Type_sym; sym_type=Some t} ->
-            c_name_of_type t
-
-and c_name_of_type = function
-    | Boolean_type -> "bool"
-    | Integer_type -> "int"
-    | Char_type -> "char"
-    | Named_type({sym_kind=Type_sym} as type_sym, _) -> c_name_of_type_sym type_sym
-    | Named_type({sym_kind=Type_param}, []) -> "void"
-    | Pointer_type(t) -> c_name_of_type t ^ "*"
 
 and c_name_of_var sym =
     match sym.sym_kind with
@@ -76,9 +98,7 @@ and c_name_of_var sym =
             end
         | Param -> c_name_of_local sym
 
-and c_name_of_type_param tp = "TP" ^ c_name_of_local tp
-
-(*let c_name_of_vtable t = "VTABLE__" ^ mangle_type t*)
+and class_vtable_type s cls = "struct " ^ c_name_of_sym cls ^ "__VTABLE"
 
 let rec is_scalar = function
     | Boolean_type -> true
@@ -94,276 +114,187 @@ let is_param_by_value param_sym =
         | Var_param | Out_param -> false
         | Const_param -> is_scalar (unsome param_sym.sym_type)
 
-let func_prototype s proc_sym =
+let rec func_prototype s complete proc_sym =
     (match proc_sym.sym_type with
         | Some No_type -> "void"
-        | Some t -> c_name_of_type t)
+        | Some t -> trans_type s complete t)
     ^ " " ^ c_name_of_sym proc_sym ^ "("
     ^ String.concat ", "
-        (List.map (fun tp ->
-            (* Type parameters pass type information. *)
-            "co_vptr " ^ c_name_of_type_param tp
-         ) (get_type_params proc_sym)
+        (List.map (fun (i, (cls, _)) ->
+            trans s true cls;
+            class_vtable_type s cls ^ " *cls" ^ string_of_int i ^ "_"
+         ) (enumerate proc_sym.sym_tconstraints)
          @ List.map (fun param ->
-            c_name_of_type (unsome param.sym_type)
+            trans_type s complete (unsome param.sym_type)
             ^ " " ^ (if is_param_by_value param then "" else "*")
             ^ c_name_of_local param
          ) (get_params proc_sym))
     ^ ")"
 
-(* Return the function pointer type for this dispatching procedure
-   with the dispatching type parameter omitted. *)
+(* Return the function pointer type for this class procedure. *)
 (* XXX: This is very similar to the above. *)
-let disp_func_ptr_type s proc_sym =
-    "(" ^ (match proc_sym.sym_type with
+and class_func_ptr_type s proc_sym inner =
+    (match proc_sym.sym_type with
         | Some No_type -> "void"
-        | Some t -> c_name_of_type t)
-    ^ " (*)(" ^ String.concat ", "
-        (List.map (fun tp -> "co_vptr")
-         (List.filter (fun tp -> not tp.sym_dispatching) (get_type_params proc_sym))
+        | Some t -> trans_type s false t)
+    ^ " (*" ^ (if inner <> "" then " " ^ inner else "") ^ ")(" ^ String.concat ", "
+        (List.map (fun (cls, _) -> class_vtable_type s cls) proc_sym.sym_tconstraints
          @ List.map (fun param ->
-            c_name_of_type (unsome param.sym_type)
+            trans_type s false (unsome param.sym_type)
             ^ (if is_param_by_value param then "" else "*")) (get_params proc_sym))
-    ^ "))"
+    ^ ")"
 
-let rec trans_istmt s = function
-    | Call(loc, proc_e, args, tbinds) ->
-        emit s (trans_iexpr s (Apply(loc, proc_e, args, tbinds)) ^ ";")
+and trans_istmt s = function
+    | Call(loc, proc_e, args, tbinds, classes) ->
+        emit s (trans_iexpr s false (Apply(loc, proc_e, args, tbinds, classes)) ^ ";")
     | Assign(loc, dest, src) ->
-        emit s (trans_iexpr s dest ^ " = " ^ trans_iexpr s src ^ ";")
+        emit s (trans_iexpr s false dest ^ " = " ^ trans_iexpr s false src ^ ";")
     | Return(loc, None) ->
         emit s ("return;")
     | Return(loc, Some e) ->
-        emit s ("return " ^ trans_iexpr s e ^ ";")
+        emit s ("return " ^ trans_iexpr s false e ^ ";")
     | If_stmt(if_parts, else_part) ->
         List.iter (fun (loc, cond, body) ->
-            emit s ("if (" ^ trans_iexpr s cond ^ "){");
-            trans_istmts (indent s) body;
+            emit s ("if (" ^ trans_iexpr s false cond ^ "){");
+            indent s (fun s -> trans_istmts s body)
         ) if_parts;
         begin match else_part with
             | None -> ()
             | Some (loc, body) ->
                 emit s ("} else {");
-                trans_istmts (indent s) body;
+                indent s (fun s -> trans_istmts s body)
         end;
         emit s "}"
     | While_stmt(loc, cond, body) ->
-        emit s ("while (" ^ trans_iexpr s cond ^ "){");
-        trans_istmts (indent s) body;
+        emit s ("while (" ^ trans_iexpr s false cond ^ "){");
+        indent s (fun s -> trans_istmts s body);
         emit s "}"
 
 and trans_istmts s = List.iter (trans_istmt s)
 
-and trans_iexpr s = function
-    | Name(loc, ({sym_kind=Param} as sym)) ->
-        if is_param_by_value sym then
-            c_name_of_var sym
-        else
-            "(*" ^ c_name_of_var sym ^ ")"
-    | Name(loc, {sym_kind=Const; sym_const=Some e}) ->
-        trans_iexpr s e
-    | Name(loc, sym) ->
-        c_name_of_var sym
-    | Int_literal(loc, n) ->
-        string_of_big_int n
-    | String_literal(loc, s) ->
-        "\"" ^ s ^ "\""
-    | Char_literal(loc, s) ->
-        "'" ^ s ^ "'"
-    | Apply(loc, proc_e, args, tbinds) ->
-        begin (* for debugging *)
-            match proc_e with Name(_,{sym_kind=Proc;sym_locals=l}) ->
-                List.iter (function
-                    | {sym_kind=Type_param} as tp ->
-                        emit s ("/* " ^ tp.sym_name ^ " dispatches to: "
-                          ^ String.concat ", " (List.map (fun (proc,_) -> proc.sym_name) (get_dispatch_list tp)) ^ " */")
-                    | _ -> ()) l
-        end;
+and trans_iexpr s pointer_wanted iexpr =
+    let v result =
+        if pointer_wanted then "&" ^ result else result
+    and p result =
+        if pointer_wanted then result else "*" ^ result
+    in match iexpr with
+        | Name(loc, ({sym_kind=Param} as sym)) ->
+            if is_param_by_value sym then
+                v (c_name_of_var sym)
+            else
+                p (c_name_of_var sym)
+        | Name(loc, {sym_kind=Const; sym_const=Some e}) ->
+            trans_iexpr s pointer_wanted e
+        | Name(loc, sym) ->
+            trans s true sym;
+            v (c_name_of_var sym)
+        | Int_literal(loc, n) ->
+            string_of_big_int n
+        | String_literal(loc, s) ->
+            "\"" ^ s ^ "\""
+        | Char_literal(loc, s) ->
+            "'" ^ s ^ "'"
+        | Dispatch(index, cls_proc, tbinds) ->
+            "cls" ^ string_of_int index ^ "_->"
+                ^ c_name_of_local cls_proc
+        | Apply(loc, proc_e, args, tbinds, classes) ->
+            v (trans_iexpr s false proc_e ^ "("
+            ^ String.concat ", "
+                (List.map (fun (cls, procs) ->
+                    "&(" ^ class_vtable_type s cls ^ "){"
+                    ^ String.concat ", "
+                        (List.map (fun (cls_proc, impl) ->
+                            "(" ^ class_func_ptr_type s cls_proc ""
+                                ^ ") " ^ c_name_of_sym impl) procs)
+                    ^ "}") !classes
+                 @ List.map (fun (param, arg) ->
+                    trans_iexpr s (not (is_param_by_value param)) arg) args) ^ ")")
+        | Binop(loc, lhs, op, rhs) ->
+            v ("(" ^ trans_iexpr s false lhs ^ ") "
+                ^ (match op with
+                    | Add -> "+"
+                    | Subtract -> "-"
+                    | Multiply -> "*"
+                    | Divide -> "/"
+                    | LT -> "<"
+                    | GT -> ">"
+                    | LE -> "<="
+                    | GE -> ">="
+                    | EQ -> "=="
+                    | NE -> "!=")
+                ^ " (" ^ trans_iexpr s false rhs ^ ")")
+        | Record_cons(loc, rec_sym, fields) ->
+            v ("(" ^ c_name_of_type_sym rec_sym ^ "){" ^
+                String.concat ", " (List.map (fun (field, value) ->
+                    trans_iexpr s false value) fields) ^ "}")
+        | Field_access(loc, lhs, field) ->
+            v ("(" ^ (trans_iexpr s false lhs) ^ ")." ^ c_name_of_local field)
+        | Deref(loc, ptr) ->
+            "*(" ^ trans_iexpr s false ptr ^ ")"
 
-        (* Is this a dispatch site? *)
-        let tbinds, proc_e' =
-            match proc_e with
-                | Name(_,({sym_kind=Proc} as proc_sym)) ->
-                    begin match maybe_find (fun (tp, ty) -> tp.sym_dispatching) tbinds with
-                        | None -> (* not dispatching *)
-                            tbinds, trans_iexpr s proc_e
-                        | Some (disp_tp, Named_type({sym_kind=Type_param} as rx_tp, [])) ->
-                            (* This is a dispatch site. Remove the dispatching type parameter
-                               from tbinds, because it's not passed as a parameter, it's
-                               used in the dispatch. *)
-                            (List.filter (fun (tp, ty) -> tp != disp_tp) tbinds),
-                                ("(" ^ disp_func_ptr_type s proc_sym
-                                 ^ " co_dispatch(" ^ c_name_of_type_param rx_tp
-                                 ^ ", (co_unkfn) &" ^ c_name_of_sym proc_sym
-                                 ^ "))")
-                        | Some (disp_tp, ty) ->
-                            (* Static dispatch. *)
-                            raise (Failure "TODO: Static dispatch")
+and trans s complete sym =
+    (* Already translated? *)
+    let desired_trans_level = if complete then 2 else 1 in
+    if sym.sym_backend_translated < desired_trans_level then begin
+        (* Need to translate. *)
+        sym.sym_backend_translated <- desired_trans_level;
+        open_scope s sym (fun s ->
+            match sym with
+                | {sym_kind=Type_sym; sym_type=Some(Record_type None)} ->
+                    (* Record type. *)
+                    if not complete then begin
+                        emit s (c_name_of_type_sym sym ^ ";") (* "struct foo;" *)
+                    end else begin
+                        emit s (c_name_of_type_sym sym ^ " {");
+                        indent s (fun s ->
+                            List.iter (function
+                                | {sym_kind=Type_param} -> ()
+                                | {sym_kind=Var} as field ->
+                                    emit s (trans_type s true (unsome field.sym_type)
+                                        ^ " " ^ c_name_of_local field ^ ";")
+                            ) sym.sym_locals
+                        );
+                        emit s "};"
                     end
-                | _ -> tbinds, trans_iexpr s proc_e
-        in
-        proc_e' ^ "("
-        ^ String.concat ", "
-            (List.map (fun (tp, t) ->
-                match t with
-                    | Named_type({sym_kind=Type_param} as tp, []) ->
-                        c_name_of_type_param tp
-                    | t -> 
-                        "(co_disp_ent[]){" ^ TODO TODO TODO c_name_of_vtable t
-             ) tbinds (* XXX: This assumes tbinds are in order! *)
-             @ List.map (fun (param, arg) ->
-            (if is_param_by_value param then trans_iexpr s arg
-            else "&(" ^ trans_iexpr s arg ^ ")")) args) ^ ")"
-    | Binop(loc, lhs, op, rhs) ->
-        "(" ^ trans_iexpr s lhs ^ ") "
-            ^ (match op with
-                | Add -> "+"
-                | Subtract -> "-"
-                | Multiply -> "*"
-                | Divide -> "/"
-                | LT -> "<"
-                | GT -> ">"
-                | LE -> "<="
-                | GE -> ">="
-                | EQ -> "=="
-                | NE -> "!=")
-            ^ " (" ^ trans_iexpr s rhs ^ ")"
-    | Record_cons(loc, rec_sym, fields) ->
-        "(" ^ c_name_of_type_sym rec_sym ^ "){" ^
-            String.concat ", " (List.map (fun (field, value) ->
-                trans_iexpr s value) fields) ^ "}"
-    | Field_access(loc, lhs, field) ->
-        (trans_iexpr s lhs) ^ "." ^ c_name_of_local field
-    | Deref(loc, ptr) ->
-        "*(" ^ trans_iexpr s ptr ^ ")"
-
-let rec declare s complete sym =
-    if sym.sym_backend_translated < (if complete then 2 else 1) then begin
-        if complete then declare_prerequisites s sym;
-        match sym with
-            | {sym_kind=Type_sym; sym_type=Some(Record_type None)} as type_sym ->
-                if complete then begin
-                    type_sym.sym_backend_translated <- 2;
-                    emit s (c_name_of_type_sym type_sym ^ " {");
-                    begin let s = indent s in
-                        List.iter (function
-                            | {sym_kind=Type_param} -> ()
-                            | {sym_kind=Var} as field ->
-                                emit s (c_name_of_type (unsome field.sym_type)
-                                    ^ " " ^ c_name_of_local field ^ ";")
-                        ) type_sym.sym_locals
-                    end;
-                    emit s "};";
-                    emit s ""
-                end else begin
-                    type_sym.sym_backend_translated <- 1;
-                    emit s (c_name_of_type_sym type_sym ^ ";") (* "struct foo;" *)
-                end
-            | {sym_kind=Type_sym; sym_type=Some t} as type_sym ->
-                declare_type s true t;
-                type_sym.sym_backend_translated <- 1
-            | {sym_kind=Proc} as proc_sym ->
-                emit s (func_prototype s proc_sym ^ ";");
-                proc_sym.sym_backend_translated <- 1
-            | {sym_kind=Var|Param} -> ()
+                | {sym_kind=Type_sym; sym_type=Some ty} ->
+                    (* Type aliases aren't translated into C - translator
+                       just uses the original type, so make sure that's declared. *)
+                    ignore (trans_type s complete ty)
+                | {sym_kind=Var} ->
+                    emit s (trans_type s true (unsome sym.sym_type) ^ " " ^ c_name_of_var sym ^ ";")
+                | {sym_kind=Proc} ->
+                    if not complete then begin
+                        emit s (func_prototype s false sym ^ ";")
+                    end else begin
+                        emit s (func_prototype s true sym);
+                        emit s "{";
+                        indent s (fun s ->
+                            trans_istmts s (unsome sym.sym_code)
+                        );
+                        emit s "}"
+                    end
+                | {sym_kind=Class} ->
+                    (* Declare the class vtable struct. *)
+                    emit s (class_vtable_type s sym ^ " {");
+                    indent s (fun s ->
+                        List.iter (fun cls_proc ->
+                            emit s (class_func_ptr_type s cls_proc (c_name_of_local cls_proc) ^ ";")
+                        ) (List.filter (is_kind Class_proc) sym.sym_locals)
+                    );
+                    emit s "};"
+        )
     end
 
-and declare_type s complete = function
-    | No_type -> ()
-    | Pointer_type(t) ->
-        declare_type s false t
-    | Boolean_type -> ()
-    | Integer_type -> ()
-    | Char_type -> ()
-    | Named_type({sym_kind=Type_param}, []) -> ()
-    | Named_type({sym_kind=Type_sym} as type_sym, _) -> declare s complete type_sym
+and trans_type s complete = function
+    | Boolean_type -> "bool"
+    | Integer_type -> "int"
+    | Char_type -> "char"
+    | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, _) ->
+        trans s complete type_sym;
+        c_name_of_type_sym type_sym
+    | Named_type({sym_kind=Type_sym; sym_type=Some ty}, _) ->
+        trans_type s complete ty
+    | Named_type({sym_kind=Type_param}, []) -> "void"
+    | Pointer_type(t) -> trans_type s false t
 
-and declare_prerequisites s = function
-    | {sym_kind=Type_sym; sym_type=Some(Record_type None)} as type_sym ->
-        List.iter (function
-            | {sym_kind=Type_param} -> ()
-            | {sym_kind=Var} as field ->
-                declare_type s true (unsome field.sym_type)
-        ) type_sym.sym_locals
-    | {sym_kind=Type_sym; sym_type=Some t} ->
-        declare_type s true t
-    | {sym_kind=Var|Param} as var_sym ->
-        declare_type s true (unsome var_sym.sym_type)
-    | {sym_kind=Type_param} -> ()
-    | {sym_kind=Proc} as proc_sym ->
-        declare_type s true (unsome proc_sym.sym_type);
-        List.iter (declare_prerequisites s) proc_sym.sym_locals;
-        if not proc_sym.sym_imported then
-            match proc_sym.sym_code with
-                | None -> ()
-                | Some stmts -> List.iter (declare_prereq_stmt s) stmts
-
-and declare_prereq_stmt s = function
-    | Call(loc, f, args, tbinds) ->
-        declare_prereq_expr s (Apply(loc, f, args, tbinds))
-    | Assign(loc, a, b) ->
-        declare_prereq_expr s a;
-        declare_prereq_expr s b
-    | Return(loc, Some e) -> declare_prereq_expr s e
-    | Return(loc, None) -> ()
-    | If_stmt(bits, else_part) ->
-        List.iter (fun (loc, cond, body) ->
-            declare_prereq_expr s cond;
-            List.iter (declare_prereq_stmt s) body
-        ) bits;
-        begin match else_part with
-            | Some(loc, body) ->
-                List.iter (declare_prereq_stmt s) body
-            | None -> ()
-        end
-    | While_stmt(loc, cond, body) ->
-        declare_prereq_expr s cond;
-        List.iter (declare_prereq_stmt s) body
-
-and declare_prereq_expr s = function
-    | Name(loc, sym) -> declare s false sym
-    | Int_literal _ -> ()
-    | String_literal _ -> ()
-    | Char_literal _ -> ()
-    | Apply(loc, f, args, tbinds) ->
-        List.iter (fun (tp, ty) ->
-            match ty with
-                | Named_type({sym_kind=Type_param}, []) -> ()
-                | _ -> (* TODO: Proper scope rules! *)
-                    declare_vtable s ty) tbinds;
-        declare_prereq_expr s f;
-        List.iter (fun (param,arg) ->
-            declare_prereq_expr s arg
-        ) args
-    | Record_cons(loc, _, fields) ->
-        List.iter (fun (_, e) -> declare_prereq_expr s e) fields
-    | Field_access(loc, e, _) -> declare_prereq_expr s e
-    | Binop(loc, lhs, op, rhs) -> declare_prereq_expr s lhs; declare_prereq_expr s rhs
-    | Deref(loc, ptr) -> declare_prereq_expr s ptr
-
-and declare_vtable s ty =
-    (*emit s ("extern const struct co_disp_ent " ^ c_name_of_vtable ty ^ "[];");
-    emit s ""*)()
-
-let declare_locals s proc_sym =
-    List.iter (fun sym ->
-        match sym.sym_kind with
-            | Var ->
-                emit s (c_name_of_type (unsome sym.sym_type)
-                    ^ " " ^ c_name_of_var sym ^ ";");
-            | _ -> ()
-    ) proc_sym.sym_locals
-
-let trans_sub s proc_sym =
-    declare_prerequisites s proc_sym;
-    proc_sym.sym_backend_translated <- 1;
-    emit s (func_prototype s proc_sym);
-    emit s "{";
-    (let s = indent s in
-        declare_locals s proc_sym;
-        match proc_sym.sym_code with
-            | Some stmts -> trans_istmts s stmts
-            | None -> emit s "abort(); /* abstract procedure should never be called */"
-    );
-    emit s "}";
-    emit s ""
+let translate s sym = trans s true sym

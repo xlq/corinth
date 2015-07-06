@@ -10,6 +10,8 @@ type sym_kind =
     | Unit
     | Var
     | Proc
+    | Class
+    | Class_proc
     | Type_sym
     | Type_param
     | Param
@@ -26,10 +28,8 @@ type symbol = {
        Type_param -> sym_type is what the type parameter is currently unified with. *)
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
-    mutable sym_dispatching: bool; (* Proc's ttype parameter is dispatching (declared "disp") *)
-    mutable sym_dispatched_to: (symbol * loc) list;
-    mutable sym_base_proc: symbol option; (* Base proc for overriding proc. *)
-    mutable sym_overrides: (symbol * ttype) list; (* Currently known overrides (XXX: does not obey any scope rules!) *)
+    mutable sym_tconstraints: (symbol * tbinds) list; (* type parameter constraints *)
+    mutable sym_implementations: symbol list;
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: bool;
@@ -48,13 +48,16 @@ and ttype =
     | Boolean_type
     | Integer_type  (* This is temporary, for development *)
     | Char_type
-    | Named_type of symbol * (symbol * ttype) list
+    | Named_type of symbol * tbinds
     | Pointer_type of ttype
     | Record_type of symbol option
-    | Proc_type of symbol
+    | Proc_type of symbol * tbinds
+
+and tbinds = (symbol * ttype) list
 
 and istmt =
-    | Call of loc * iexpr * (symbol * iexpr) list * (symbol * ttype) list
+    | Call of loc * iexpr * (symbol * iexpr) list * tbinds
+            * (symbol * (symbol * symbol) list) list ref
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
     | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
@@ -65,8 +68,10 @@ and iexpr =
     | Int_literal of loc * big_int
     | String_literal of loc * string
     | Char_literal of loc * string
+    | Dispatch of int * symbol * tbinds
     | Apply of loc * iexpr * (symbol * iexpr) list (* parameter bindings *)
-                           * (symbol * ttype) list (* type parameter bindings *)
+                           * tbinds (* type parameter bindings *)
+                           * (symbol * (symbol * symbol) list) list ref (* classes *)
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
@@ -79,6 +84,8 @@ let dummy_loc = {
     Lexing.pos_cnum = 0;
 }
 
+let is_kind kind sym = sym.sym_kind = kind
+
 let new_root_sym () =
     let rec sym = {
         sym_parent = sym;
@@ -87,10 +94,8 @@ let new_root_sym () =
         sym_defined = Some dummy_loc;
         sym_type = None;
         sym_locals = [];
-        sym_dispatching = false;
-        sym_dispatched_to = [];
-        sym_base_proc = None;
-        sym_overrides = [];
+        sym_tconstraints = [];
+        sym_implementations = [];
         sym_param_mode = Const_param;
         sym_code = None;
         sym_imported = false;
@@ -106,6 +111,7 @@ let describe_sym sym =
         | Unit       -> "unit"
         | Var        -> "variable"
         | Proc       -> "procedure"
+        | Class      -> "class"
         | Type_sym   -> "type"
         | Type_param -> "type parameter"
         | Param      -> "parameter"
@@ -118,10 +124,8 @@ let create_sym parent loc name kind =
         sym_defined = Some loc;
         sym_type = None;
         sym_locals = [];
-        sym_dispatching = false;
-        sym_dispatched_to = [];
-        sym_base_proc = None;
-        sym_overrides = [];
+        sym_tconstraints = [];
+        sym_implementations = [];
         sym_param_mode = Const_param;
         sym_code = None;
         sym_imported = false;
@@ -135,10 +139,7 @@ let create_sym parent loc name kind =
     new_sym
 
 let get_type_params sym =
-    List.filter (fun sym -> sym.sym_kind = Type_param) sym.sym_locals
-
-let get_dispatching_type_param sym =
-    List.find (function {sym_kind=Type_param; sym_dispatching=true} -> true | _ -> false) sym.sym_locals
+    List.filter (is_kind Type_param) sym.sym_locals
 
 let rec get_fields sym =
     match sym with
@@ -147,7 +148,7 @@ let rec get_fields sym =
         | _ -> raise (Failure "get_fields")
 
 let get_params sym =
-    List.filter (fun s -> s.sym_kind = Param) sym.sym_locals
+    List.filter (is_kind Param) sym.sym_locals
 
 let rec string_of_type_int expand_tp = function
     | No_type -> "<no type>"
@@ -180,33 +181,6 @@ let full_name sym =
             if s.sym_parent == s then r
             else follow (s.sym_name::r) s.sym_parent
          in follow [] sym)
-
-let is_dispatching sym =
-    assert (sym.sym_kind = Proc);
-    List.exists (function
-        | {sym_kind=Type_param; sym_dispatching=true} -> true
-        | _ -> false) sym.sym_locals
-
-(* Return list of dispatching procedures a type parameter must be dispatchable to.
-   Each dispatching procedure is paired with the chain of type parameters followed
-   to find where the dispatching procedure is needed.
-   XXX: This includes the procedure that tp belongs to. Should it? *)
-let get_dispatch_list tp =
-    let result = ref [] in
-    let rec collect stack history tp =
-        if List.exists ((==) tp) stack then () else begin
-            begin match maybe_find (fun (proc,_) -> proc == tp.sym_parent) !result with
-                | Some (_,history0) ->
-                    if List.length history < List.length !history0 then
-                        history0 := history
-                | None ->
-                    result := (tp.sym_parent, ref history) :: !result
-            end;
-            List.iter (fun (tp2,loc) ->
-                collect (tp::stack) ((tp2,loc)::history) tp2) tp.sym_dispatched_to
-        end
-    in collect [] [] tp;
-    List.map (fun (tp,hist) -> (tp,!hist)) !result
 
 let rec iter_type_params_in f = function
     | No_type | Boolean_type | Integer_type | Char_type -> ()
