@@ -146,7 +146,11 @@ let exi_quant_param ts sym (f: translation_state -> 'a) =
 let substitute ts tp ty e =
     assert (not (List.mem_assq tp !(ts.ts_subst))); (* not already substituted *)
     (* can only substitute if allowed *)
-    if not (List.memq tp.sym_parent ts.ts_exi_quants) then raise e;
+    if not (List.memq tp.sym_parent ts.ts_exi_quants) then begin
+        (* prerr_endline ("Cannot subst " ^ tp.sym_name ^ " -> " ^ string_of_type ty);
+        prerr_endline (String.concat ", " (List.map (fun s -> s.sym_name) ts.ts_exi_quants)); *)
+        raise e
+    end;
     (* add to current substitutions *)
     ts.ts_subst := (tp, ty)::!(ts.ts_subst)
 
@@ -203,34 +207,51 @@ let rec same_type t1 t2 =
 
 exception Type_mismatch
 
-let rec type_check ts loc t1 t2 =
+let rec type_check ts t1 t2 =
     match t1, t2 with
         | t1, t2 when t1 == t2 -> () (* short-cut if the types are exactly the same *)
         | No_type, No_type -> ()
-        | Pointer_type(t1), Pointer_type(t2) -> type_check ts loc t1 t2
+        | Pointer_type(t1), Pointer_type(t2) -> type_check ts t1 t2
         | Named_type(s1, params1), Named_type(s2, params2) when s1 == s2 ->
             (* Same symbol. Type params must match too. *)
             List.iter2 (fun (param1, t1) (param2, t2) ->
                 assert (param1 == param2);
-                type_check ts loc t1 t2
+                type_check ts t1 t2
             ) params1 params2
 
         (* Type parameters. *)
+        (* XXX: This is a horrid mess! Tidy it up! *)
+        | Named_type({sym_kind=Type_param} as tp1, []),
+          Named_type({sym_kind=Type_param} as tp2, []) ->
+            (* Type parameters on both sides. *)
+            begin match maybe_assq tp1 !(ts.ts_subst) with
+                | Some t1 -> type_check ts t1 t2 (* apply current substitution to t1 *)
+                | None -> match maybe_assq tp2 !(ts.ts_subst) with
+                    | Some t2 -> type_check ts t1 t2 (* apply current substitution to t2 *)
+                    | None ->
+                        if List.memq tp2.sym_parent ts.ts_exi_quants then
+                            (* perform substitution in the direction that will work
+                               e.g. T -> U will fail if T is not in exi_quants
+                               but U -> T is still a valid unification. *)
+                            substitute ts tp2 t1 Type_mismatch
+                        else
+                            substitute ts tp1 t2 Type_mismatch
+            end
         | Named_type({sym_kind=Type_param} as tp, []), t2 ->
             begin match maybe_assq tp !(ts.ts_subst) with
-                | Some t1 -> type_check ts loc t1 t2 (* apply current substitution *)
+                | Some t1 -> type_check ts t1 t2 (* apply current substitution *)
                 | None -> substitute ts tp t2 Type_mismatch (* substitute to make types match *)
             end
         | t1, Named_type({sym_kind=Type_param} as tp, []) ->
             begin match maybe_assq tp !(ts.ts_subst) with
-                | Some t2 -> type_check ts loc t1 t2 (* apply current substitution *)
+                | Some t2 -> type_check ts t1 t2 (* apply current substitution *)
                 | None -> substitute ts tp t1 Type_mismatch (* substitute to make types match *)
             end
 
         (* Type aliases. *)
         | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
         | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) ->
-            type_check ts loc t1 t2
+            type_check ts t1 t2
         (* Type mismatches. *)
         | No_type, _ | _, No_type
         | Integer_type, _ | _, Integer_type
@@ -240,8 +261,38 @@ let rec type_check ts loc t1 t2 =
         | Named_type _, Named_type _ ->
             raise Type_mismatch
 
+(* Check function symbol fsym2 is an instance of fsym1. *)
+let check_func_is_instance ts loc fsym1 fsym2 =
+    let (), _ = exi_quant_param ts fsym1 (fun ts ->
+        let params1 = get_params fsym1 in
+        let params2 = get_params fsym2 in
+        if List.length params1 <> List.length params2 then begin
+            Errors.semantic_error loc
+                (String.capitalize (describe_sym fsym2) ^ " `" ^ name_for_error ts fsym2 ^ "' has "
+                    ^ string_of_int (List.length params2) ^ " parameter(s), but...");
+            Errors.semantic_error (unsome fsym1.sym_defined)
+                ("..." ^ describe_sym fsym1 ^ " `" ^ name_for_error ts fsym1 ^ "' has "
+                    ^ string_of_int (List.length params1) ^ ".");
+            raise Errors.Compile_error
+        end;
+        (* TODO: Better matching for errors? (Try to find one with correct name on name mismatch, etc. *)
+        List.iter2 (fun param1 param2 ->
+            begin try type_check ts (unsome param1.sym_type) (unsome param2.sym_type)
+            with Type_mismatch ->
+                Errors.semantic_error loc ("Parameter `" ^ param2.sym_name ^ "' of " ^ describe_sym fsym2 ^ " `"
+                    ^ name_for_error ts fsym2 ^ "' has type `"
+                    ^ string_of_type (unsome param2.sym_type) ^ "', but...");
+                Errors.semantic_error (unsome param1.sym_defined) ("parameter `"
+                    ^ param1.sym_name ^ "' of " ^ describe_sym fsym1 ^ " `"
+                    ^ name_for_error ts fsym1 ^ "' has type `" ^ string_of_type (unsome param1.sym_type) ^ "'.");
+                raise Errors.Compile_error
+            end
+            (* TODO: Check names -> issue a warning? *)
+        ) params1 params2
+    ) in ()
+
 let expect_type ts loc target_type why_target source_type =
-    try type_check ts loc target_type source_type
+    try type_check ts target_type source_type
     with Type_mismatch ->
         Errors.semantic_error loc
             ("Type mismatch " ^ why_target ^ ": expected `"
@@ -249,7 +300,7 @@ let expect_type ts loc target_type why_target source_type =
                 ^ "' but got `" ^ string_of_type source_type ^ "'.")
 
 let match_types ts loc t1 t2 =
-    try type_check ts loc t1 t2
+    try type_check ts t1 t2
     with Type_mismatch ->
         Errors.semantic_error loc
             ("Incompatible types: `"
@@ -388,7 +439,10 @@ and trans_decl ts = function
                 | Some name ->
                     match find_dotted_name ts loc name with
                         | ({sym_kind=Class_proc} as cls_proc), [] ->
-                            (* TODO: Check the type is an instance of cls_proc. *)
+                            assert (cls_proc.sym_parent.sym_kind = Class);
+                            ignore (exi_quant_param ts cls_proc.sym_parent (fun ts ->
+                                check_func_is_instance ts loc cls_proc proc_sym
+                            ));
                             cls_proc.sym_implementations <- proc_sym :: cls_proc.sym_implementations
                         | bad_sym, _ -> wrong_sym_kind ts loc bad_sym "class proc" (* TODO: better loc *)
             end;
@@ -835,16 +889,18 @@ and trans_expr ts (target_type: ttype option) = function
                                 let candidates = List.fold_left (fun candidates impl ->
                                     let impl_params = get_params impl in
                                     try
-                                        ignore (exi_quant_param ts cls_proc (fun ts ->
+                                        ignore (exi_quant_param ts impl (fun ts ->
                                             List.iter2 (fun cls_param impl_param ->
-                                                type_check ts loc
+                                                prerr_endline ("Checking " ^ string_of_type (unsome cls_param.sym_type)
+                                                    ^ " against " ^ string_of_type (unsome impl_param.sym_type));
+                                                type_check ts
                                                     (unsome cls_param.sym_type)
                                                     (unsome impl_param.sym_type)
                                             ) cls_params impl_params;
-                                            type_check ts loc
+                                            type_check ts
                                                 (unsome cls_proc.sym_type)
                                                 (unsome impl.sym_type)
-                                        ) (*in*) );
+                                        ));
                                         (impl (*, instantiation*))::candidates
                                     with Type_mismatch -> candidates
                                 ) [] cls_proc.sym_implementations in

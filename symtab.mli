@@ -84,6 +84,7 @@ val get_type_params : symbol -> symbol list
 val get_fields : symbol -> symbol list (* get record fields, including from base type *)
 val get_params : symbol -> symbol list (* get proc parameters *)
 val string_of_type : ttype -> string
+val string_of_type_2 : tbinds -> ttype -> string
 val sym_is_grandchild : symbol -> symbol -> bool
 val full_name : symbol -> string
 val iter_type_params_in : (symbol -> unit) -> ttype -> unit (* call function for each type parameter in type *)

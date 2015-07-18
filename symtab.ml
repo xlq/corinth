@@ -112,6 +112,7 @@ let describe_sym sym =
         | Var        -> "variable"
         | Proc       -> "procedure"
         | Class      -> "class"
+        | Class_proc -> "class procedure"
         | Type_sym   -> "type"
         | Type_param -> "type parameter"
         | Param      -> "parameter"
@@ -150,23 +151,29 @@ let rec get_fields sym =
 let get_params sym =
     List.filter (is_kind Param) sym.sym_locals
 
-let rec string_of_type_int expand_tp = function
+let rec string_of_type_int substs = function
     | No_type -> "<no type>"
     | Boolean_type -> "bool"
     | Integer_type -> "int"
     | Char_type -> "char"
-    | Named_type({sym_kind=Type_param; sym_type=Some t}, []) when expand_tp -> string_of_type_int true t
+    | Named_type({sym_kind=Type_param} as tp, []) ->
+        begin match maybe_assq tp substs with
+            | None -> tp.sym_name
+            | Some t -> string_of_type_int substs t
+        end
     | Named_type(sym, []) -> sym.sym_name
     | Named_type(sym, args) ->
         sym.sym_name ^ "<" ^ String.concat ", "
             (List.map (fun (param, arg) ->
-                param.sym_name ^ "=" ^ string_of_type_int expand_tp arg) args) ^ ">"
-    | Pointer_type t -> "^" ^ string_of_type_int expand_tp t
+                param.sym_name ^ "=" ^ string_of_type_int substs arg) args) ^ ">"
+    | Pointer_type t -> "^" ^ string_of_type_int substs t
     | Proc_type _ -> "<proc type>"
 
-let string_of_type t =
-    let short = string_of_type_int false t in
-    let long = string_of_type_int true t in
+let string_of_type t = string_of_type_int [] t
+
+let string_of_type_2 substs t =
+    let short = string_of_type_int [] t in
+    let long = string_of_type_int substs t in
     if short = long then short
     else short ^ " (" ^ long ^ ")"
 
