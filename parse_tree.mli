@@ -58,3 +58,4 @@ and expr =
     | Record_cons of loc * expr args
     | Binop of loc * expr * Symtab.binop * expr
     | Deref of loc * expr
+    | New of loc * ttype

@@ -75,6 +75,7 @@ and iexpr =
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
     | Deref of loc * iexpr
+    | New of loc * ttype
 
 val is_kind : sym_kind -> symbol -> bool
 val new_root_sym : unit -> symbol

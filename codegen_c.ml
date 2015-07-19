@@ -66,7 +66,10 @@ let new_state root =
         s_current_indent = 0;
         s_lines = [];
     } in
-    open_scope s root (fun s -> emit s "#include <stdbool.h>");
+    open_scope s root (fun s ->
+        emit s "#include <stdbool.h>";
+        emit s "#include <stdlib.h>"
+    );
     s
 
 let rec dotted_name_of_sym sym =
@@ -231,6 +234,8 @@ and trans_iexpr s pointer_wanted iexpr =
             v ("(" ^ (trans_iexpr s false lhs) ^ ")." ^ c_name_of_local field)
         | Deref(loc, ptr) ->
             "*(" ^ trans_iexpr s false ptr ^ ")"
+        | New(loc, ty) ->
+            "malloc(sizeof(" ^ trans_type s true ty ^ "))"
 
 and trans s complete sym =
     (* Already translated? *)
@@ -295,6 +300,6 @@ and trans_type s complete = function
     | Named_type({sym_kind=Type_sym; sym_type=Some ty}, _) ->
         trans_type s complete ty
     | Named_type({sym_kind=Type_param}, []) -> "void"
-    | Pointer_type(t) -> trans_type s false t
+    | Pointer_type(t) -> trans_type s false t ^ " *"
 
 let translate s sym = trans s true sym

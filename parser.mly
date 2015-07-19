@@ -21,8 +21,8 @@
 %token <string> CHARLIT
 
 /* Keywords */
-%token CLASS CONST ELSE ELSIF END IF IMPLEMENTS IMPORTED IS LOOP OUT OVERRIDING PROC RETURN THEN
-%token TYPE UNIT VAR WHILE WITH
+%token CLASS CONST ELSE ELSIF END IF IMPLEMENTS IMPORTED IS LOOP NEW OUT
+%token OVERRIDING PROC RETURN THEN TYPE UNIT VAR WHILE WITH
 
 
 %token LPAREN RPAREN LBRACE RBRACE QUESTION COLON SEMICOLON DOT COMMA STAR
@@ -33,11 +33,11 @@
 %start unit_decl
 %type <Parse_tree.unit_decl> unit_decl
 
+%right CARET
 %left LT GT LE GE EQ NE
 %left PLUS DASH
 %left STAR SLASH
 %left LPAREN
-%right CARET
 
 %%
 
@@ -191,6 +191,7 @@ expr:
     | expr EQ expr { Binop(loc(), $1, Symtab.EQ, $3) }
     | expr NE expr { Binop(loc(), $1, Symtab.NE, $3) }
     | expr CARET { Deref(loc(), $1) }
+    | NEW ttype { New(loc(), $2) }
 
 expr_map:
     | expr { ([$1], []) }

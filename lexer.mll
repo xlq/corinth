@@ -18,6 +18,7 @@
         "imported",      IMPORTED;
         "is",            IS;
         "loop",          LOOP;
+        "new",           NEW;
         "out",           OUT;
         "overriding",    OVERRIDING;
         "proc",          PROC;

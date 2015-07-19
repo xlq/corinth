@@ -930,8 +930,8 @@ and trans_expr ts (target_type: ttype option) = function
         end
     | Parse_tree.Record_cons(loc, (pos_fields, named_fields)) ->
         (* Get record type from context. *)
-        let rec_sym = match target_type with
-            | Some(Named_type({sym_type=Some(Record_type _)} as sym, [])) -> sym
+        let rec_sym, tbinds = match target_type with
+            | Some(Named_type({sym_type=Some(Record_type _)} as sym, tbinds)) -> sym, tbinds
             | Some t -> Errors.semantic_error loc
                 ("Value of type `" ^ string_of_type t
                     ^ "' expected but record constructor found.");
@@ -940,17 +940,20 @@ and trans_expr ts (target_type: ttype option) = function
                 ("Record type cannot be determined by context.");
                 raise Errors.Compile_error
         in
-        (* Match expressions to record's fields. *)
-        (Record_cons(loc, rec_sym,
-            List.map (fun (field, expr) ->
-                assert (present field.sym_type);
-                let expr, expr_type, _ = trans_expr ts field.sym_type expr in
-                expect_type ts loc (unsome field.sym_type)
-                    ("for field `" ^ field.sym_name ^ "'") expr_type;
-                (field, expr)
-            ) (match_args_to_params loc "record fields"
-                (get_fields rec_sym) pos_fields named_fields)
-         ), Named_type(rec_sym, []), false)
+        fst (unif_ctx ts (fun ts ->
+            activate ts tbinds;
+            (* Match expressions to record's fields. *)
+            (Record_cons(loc, rec_sym,
+                List.map (fun (field, expr) ->
+                    assert (present field.sym_type);
+                    let expr, expr_type, _ = trans_expr ts field.sym_type expr in
+                    expect_type ts loc (unsome field.sym_type)
+                        ("for field `" ^ field.sym_name ^ "'") expr_type;
+                    (field, expr)
+                ) (match_args_to_params loc "record fields"
+                    (get_fields rec_sym) pos_fields named_fields)
+             ), unsome target_type, false)
+        ))
     | Parse_tree.Binop(loc, lhs, op, rhs) ->
         let lhs, lhs_type, _ = trans_expr ts None lhs in
         let rhs, rhs_type, _ = trans_expr ts None rhs in
@@ -970,6 +973,9 @@ and trans_expr ts (target_type: ttype option) = function
                         ^ string_of_type ptr_type ^ "'.");
                 raise Compile_error
         end
+    | Parse_tree.New(loc, ty) ->
+        let ty = trans_type ts ty in
+        (New(loc, ty), Pointer_type ty, false)
 
 let finish_trans ts unit =
     while !(ts.ts_todo) <> [] do

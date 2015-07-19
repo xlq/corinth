@@ -76,6 +76,7 @@ and iexpr =
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
     | Deref of loc * iexpr
+    | New of loc * ttype
 
 let dummy_loc = {
     Lexing.pos_fname = "<built-in>";
@@ -144,8 +145,8 @@ let get_type_params sym =
 
 let rec get_fields sym =
     match sym with
-        | {sym_kind=Type_sym; sym_type=Some(Record_type(base)); sym_locals=fields} ->
-            fields @ (match base with Some t -> get_fields t | None -> [])
+        | {sym_kind=Type_sym; sym_type=Some(Record_type(base)); sym_locals=locals} ->
+            (List.filter (function {sym_kind=Var} -> true | _ -> false) locals) @ (match base with Some t -> get_fields t | None -> [])
         | _ -> raise (Failure "get_fields")
 
 let get_params sym =
