@@ -59,3 +59,4 @@ and expr =
     | Binop of loc * expr * Symtab.binop * expr
     | Deref of loc * expr
     | New of loc * expr
+    | Field_access of loc * expr * string

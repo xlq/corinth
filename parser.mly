@@ -39,6 +39,7 @@
 %left LPAREN
 %left NEW
 %right CARET
+%left DOT
 
 %%
 
@@ -196,6 +197,7 @@ expr:
     | expr NE expr { Binop(loc(), $1, Symtab.NE, $3) }
     | expr CARET { Deref(loc(), $1) }
     | NEW expr { New(loc(), $2) }
+    | expr DOT IDENT { Field_access(rhs_start_pos 3, $1, $3) }
 
 expr_map:
     | expr { ([$1], []) }

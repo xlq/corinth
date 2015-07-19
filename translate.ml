@@ -818,7 +818,7 @@ and trans_expr ts (target_type: ttype option) = function
                                     begin match maybe_find (fun s -> s.sym_name = name) (get_fields type_sym) with
                                         | Some field ->
                                             follow_name_tail (Right(Field_access(loc, expr, field),
-                                                  (unsome field.sym_type), lvalue)) name_tail
+                                                  subst_tparams tparams (unsome field.sym_type), lvalue)) name_tail
                                         | None ->
                                             Errors.semantic_error loc
                                                 ("Type `" ^ name_for_error ts type_sym ^ "' has no field named `"
@@ -837,6 +837,25 @@ and trans_expr ts (target_type: ttype option) = function
                         | Right(expr, ty, lvalue), [] ->
                             (expr, ty, lvalue)
                 in follow_name_tail result name_tail
+        end
+    | Parse_tree.Field_access(loc, e, name) ->
+        (* TODO: Merge with above. *)
+        let e, ty, lv = trans_expr ts None e in
+        begin match ty with
+            | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, tparams) ->
+                begin match maybe_find (fun s -> s.sym_name = name) (get_fields type_sym) with
+                    | Some field ->
+                        (Field_access(loc, e, field), subst_tparams tparams (unsome field.sym_type), lv)
+                    | None ->
+                        Errors.semantic_error loc
+                            ("Type `" ^ name_for_error ts type_sym ^ "' has no field named `"
+                                ^ name ^ "'.");
+                        raise Errors.Compile_error
+                end
+            | wrong_type ->
+                Errors.semantic_error loc
+                    ("Type `" ^ string_of_type ty ^ "' has no fields.");
+                raise Errors.Compile_error
         end
     | Parse_tree.Int_literal(loc, n) ->
         (Int_literal(loc, n), Integer_type, false)
