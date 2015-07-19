@@ -755,19 +755,19 @@ and trans_expr ts (target_type: ttype option) = function
         let name_start :: name_tail = name in
         let loc_of_result = function
             | Left s -> (unsome s.sym_defined)
-            | Right(e, _, _) -> loc_of_iexpr e
+            | Right(_, _, _, defloc) -> defloc
         in
         let result_of_sym loc sym =
             match sym with
                 | {sym_kind=Unit} -> Left(sym)
                 | {sym_kind=Var}
                 | {sym_kind=Param; sym_param_mode=Var_param|Out_param} ->
-                    Right(Name(loc, sym), unsome sym.sym_type, true)
+                    Right(Name(loc, sym), unsome sym.sym_type, true, unsome sym.sym_defined)
                 | {sym_kind=Const}
                 | {sym_kind=Param; sym_param_mode=Const_param} ->
-                    Right(Name(loc, sym), unsome sym.sym_type, false)
+                    Right(Name(loc, sym), unsome sym.sym_type, false, unsome sym.sym_defined)
                 | {sym_kind=Proc} ->
-                    Right(Name(loc, sym), Proc_type(sym, []), false)
+                    Right(Name(loc, sym), Proc_type(sym, []), false, unsome sym.sym_defined)
         in
 
         (* Search for first part of name. *)
@@ -783,7 +783,7 @@ and trans_expr ts (target_type: ttype option) = function
                         if cls_proc.sym_kind = Class_proc && cls_proc.sym_name = name_start then
                             (* This class proc is a candidate. *)
                             (Right(Dispatch(class_index, cls_proc, targs),
-                                   Proc_type(cls_proc, targs), false))::results
+                                   Proc_type(cls_proc, targs), false, unsome cls_proc.sym_defined))::results
                         else results
                     ) results tclass.sym_locals
                 ) results (enumerate scope.sym_tconstraints)
@@ -811,14 +811,14 @@ and trans_expr ts (target_type: ttype option) = function
                                         ^ name ^ "'."); raise Errors.Compile_error
                                 | Some sym -> follow_name_tail (result_of_sym loc sym) name_tail
                             end
-                        | Right(expr, ty, lvalue), name::name_tail ->
+                        | Right(expr, ty, lvalue, _), name::name_tail ->
                             (* Look field up in record type. *)
                             begin match ty with
                                 | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, tparams) ->
                                     begin match maybe_find (fun s -> s.sym_name = name) (get_fields type_sym) with
                                         | Some field ->
                                             follow_name_tail (Right(Field_access(loc, expr, field),
-                                                  subst_tparams tparams (unsome field.sym_type), lvalue)) name_tail
+                                                  subst_tparams tparams (unsome field.sym_type), lvalue, unsome field.sym_defined)) name_tail
                                         | None ->
                                             Errors.semantic_error loc
                                                 ("Type `" ^ name_for_error ts type_sym ^ "' has no field named `"
@@ -834,7 +834,7 @@ and trans_expr ts (target_type: ttype option) = function
                             Errors.semantic_error loc ("Expression expected but unit `"
                                 ^ name_for_error ts unit_sym ^ "' found.");
                             raise Errors.Compile_error
-                        | Right(expr, ty, lvalue), [] ->
+                        | Right(expr, ty, lvalue, _), [] ->
                             (expr, ty, lvalue)
                 in follow_name_tail result name_tail
         end
