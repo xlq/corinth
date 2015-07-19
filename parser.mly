@@ -37,8 +37,8 @@
 %left PLUS DASH
 %left STAR SLASH
 %left LPAREN
-%right CARET
 %left NEW
+%right CARET
 
 %%
 
@@ -195,7 +195,7 @@ expr:
     | expr EQ expr { Binop(loc(), $1, Symtab.EQ, $3) }
     | expr NE expr { Binop(loc(), $1, Symtab.NE, $3) }
     | expr CARET { Deref(loc(), $1) }
-    | NEW ttype { New(loc(), $2) }
+    | NEW expr { New(loc(), $2) }
 
 expr_map:
     | expr { ([$1], []) }

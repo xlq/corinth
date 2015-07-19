@@ -9,6 +9,7 @@ type state = {
     s_scope_indent: int;            (* indent level of this scope *)
     mutable s_current_indent: int;  (* current indent level *)
     mutable s_lines: string list;   (* lines of C code (reverse order) *)
+    s_temp_counter: int ref;        (* counter for creating new temporaries *)
 }
 
 let indent s f =
@@ -35,6 +36,7 @@ let open_scope s scope f =
         s_scope_indent = appropriate_state.s_scope_indent + 1;
         s_current_indent = appropriate_state.s_scope_indent + 1; (* not an error - we start again at the indentation level of the parent scope *)
         s_lines = [];
+        s_temp_counter = s.s_temp_counter;
     } in
     let result = f new_state in (* if it fails, we discard the lines it produced *)
     let lines = new_state.s_lines in
@@ -65,12 +67,19 @@ let new_state root =
         s_scope_indent = -1;
         s_current_indent = 0;
         s_lines = [];
+        s_temp_counter = ref 0;
     } in
     open_scope s root (fun s ->
         emit s "#include <stdbool.h>";
         emit s "#include <stdlib.h>"
     );
     s
+
+let new_temp s =
+    s.s_temp_counter := !(s.s_temp_counter) + 1;
+    !(s.s_temp_counter)
+
+let c_temp_name i = "tmp" ^ string_of_int i ^ "_"
 
 let rec dotted_name_of_sym sym =
     if sym.sym_parent == sym then []
@@ -234,8 +243,12 @@ and trans_iexpr s pointer_wanted iexpr =
             v ("(" ^ (trans_iexpr s false lhs) ^ ")." ^ c_name_of_local field)
         | Deref(loc, ptr) ->
             "*(" ^ trans_iexpr s false ptr ^ ")"
-        | New(loc, ty) ->
-            "malloc(sizeof(" ^ trans_type s true ty ^ "))"
+        | New(loc, ty, e) ->
+            let tmp = new_temp s in
+            emit s (trans_type s false ty ^ " *" ^ c_temp_name tmp
+                ^ " = malloc(sizeof(" ^ trans_type s true ty ^ "));");
+            emit s ("*" ^ c_temp_name tmp ^ " = " ^ trans_iexpr s false e ^ ";");
+            c_temp_name tmp
 
 and trans s complete sym =
     (* Already translated? *)

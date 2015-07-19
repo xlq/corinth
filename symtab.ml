@@ -76,7 +76,7 @@ and iexpr =
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
     | Deref of loc * iexpr
-    | New of loc * ttype
+    | New of loc * ttype * iexpr
 
 let dummy_loc = {
     Lexing.pos_fname = "<built-in>";

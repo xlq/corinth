@@ -364,6 +364,7 @@ let rec loc_of_iexpr = function
     | Field_access(loc, _, _)
     | Binop(loc, _, _, _)
     | Deref(loc, _)
+    | New(loc, _, _)
         -> loc
 
 let rec trans_unit ts = function
@@ -973,9 +974,18 @@ and trans_expr ts (target_type: ttype option) = function
                         ^ string_of_type ptr_type ^ "'.");
                 raise Compile_error
         end
-    | Parse_tree.New(loc, ty) ->
-        let ty = trans_type ts ty in
-        (New(loc, ty), Pointer_type ty, false)
+    | Parse_tree.New(loc, e) ->
+        let e, ty, lv = trans_expr ts
+            (match target_type with
+                | None -> None
+                | Some(Pointer_type ty) -> Some ty
+                | Some ty ->
+                    Errors.semantic_error loc
+                        ("Value of type " ^ string_of_type ty
+                            ^ "' expected but `new' found.");
+                    raise Errors.Compile_error
+            ) e in
+        (New(loc, ty, e), Pointer_type ty, false)
 
 let finish_trans ts unit =
     while !(ts.ts_todo) <> [] do
