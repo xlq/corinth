@@ -33,11 +33,12 @@
 %start unit_decl
 %type <Parse_tree.unit_decl> unit_decl
 
-%right CARET
 %left LT GT LE GE EQ NE
 %left PLUS DASH
 %left STAR SLASH
 %left LPAREN
+%right CARET
+%left NEW
 
 %%
 
@@ -45,7 +46,7 @@ dotted_name:
     | IDENT { [$1] }
     | IDENT DOT dotted_name { $1 :: $3 }
 
-ttype:
+ttype_inner:
     | dotted_name {
         match $1 with
             | ["bool"] -> Boolean_type
@@ -53,7 +54,10 @@ ttype:
             | ["char"] -> Char_type
             | _ -> Named_type(loc(), $1)
         }
-    | ttype LT type_args GT { Applied_type(loc(), $1, $3) }
+    | ttype_inner LT type_args GT { Applied_type(loc(), $1, $3) }
+
+ttype:
+    | ttype_inner { $1 }
     | CARET ttype { Pointer_type($2) }
 
 type_args:
