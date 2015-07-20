@@ -16,6 +16,7 @@ type sym_kind =
     | Type_param
     | Param
     | Const
+    | Proc_type_sym
 
 type symbol = {
     sym_parent: symbol; (* Parent symbol (this symbol is in sym_parent.sym_locals). *)

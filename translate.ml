@@ -191,7 +191,7 @@ let follow_tparams ts = subst_tparams !(ts.ts_subst)
 
 (* Return the actual type (follow Named_type) *)
 let rec actual_type = function
-    | (Integer_type | Char_type | Pointer_type _ | Record_type _) as t -> t
+    | (Integer_type | Char_type | Pointer_type _ | Record_type _ | Proc_type _) as t -> t
     | Named_type({sym_kind=Type_sym; sym_type=Some t}, _) -> t
 
 let rec same_type t1 t2 =
@@ -248,6 +248,25 @@ let rec type_check ts t1 t2 =
             begin match maybe_assq tp !(ts.ts_subst) with
                 | Some t2 -> type_check ts t1 t2 (* apply current substitution *)
                 | None -> substitute ts tp t1 Type_mismatch (* substitute to make types match *)
+            end
+
+        | Proc_type(s1, []), Proc_type(s2, []) ->
+            (* TODO: Handle non-empty tbinds! *)
+            (* TODO: Nominal type checking:
+                We want to allow implicit conversion from anonymous to a
+                compatible function pointer type, but not between named
+                function pointer types. *)
+            (* TODO: Merge with checking for "implements" *)
+            (* TODO: Unify type parameters etc.! Requires trampolines oh no! *)
+            let params1 = get_params s1 in
+            let params2 = get_params s2 in
+            if (List.length params1) <> (List.length params2) then raise Type_mismatch
+            else begin
+                List.iter2 (fun param1 param2 ->
+                    (* TODO: Check parameter names! *)
+                    type_check ts (unsome param1.sym_type) (unsome param2.sym_type)
+                ) params1 params2;
+                type_check ts (unsome s1.sym_type) (unsome s2.sym_type) (* return types *)
             end
 
         (* Type aliases. *)
@@ -595,6 +614,13 @@ and trans_type ts = function
         end
     | Parse_tree.Pointer_type(ttype) ->
         Pointer_type(trans_type ts ttype)
+    | Parse_tree.Proc_type(loc, constr_type_params, params, return_type) ->
+        let ptypesym = create_sym ts.ts_scope loc "" Proc_type_sym in
+        trans_constrained_type_params {ts with ts_scope = ptypesym} constr_type_params;
+        trans_params ts ptypesym params return_type;
+        Proc_type(ptypesym, [])
+        
+
 
 and trans_stmts ts = List.iter (trans_stmt ts)
 
@@ -792,7 +818,7 @@ and trans_expr ts (target_type: ttype option) = function
         (Char_literal(loc, s), Char_type, false)
     | Parse_tree.Apply(loc, proc, (pos_args, named_args)) ->
         let proc, proc_type, _ = trans_expr ts None proc in
-        begin match proc_type with
+        begin match actual_type proc_type with
             | Proc_type(proc_sym, tbinds) ->
                 (* proc_sym is either a Proc symbol or a Proc_type Type_sym symbol. *)
                 let matched_args, tbinds = exi_quant_param ts proc_sym (fun ts ->

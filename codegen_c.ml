@@ -120,6 +120,7 @@ let rec is_scalar = function
     | Named_type({sym_kind=Type_sym; sym_type=Some t}, _) -> is_scalar t
     | Named_type({sym_kind=Type_param}, []) -> false
     | Pointer_type _ -> true
+    | Proc_type _ -> true
 
 let is_param_by_value param_sym =
     match param_sym.sym_param_mode with
@@ -127,34 +128,28 @@ let is_param_by_value param_sym =
         | Const_param -> is_scalar (unsome param_sym.sym_type)
 
 let rec func_prototype s complete proc_sym =
-    (match proc_sym.sym_type with
-        | Some No_type -> "void"
-        | Some t -> trans_type s complete t)
-    ^ " " ^ c_name_of_sym proc_sym ^ "("
-    ^ String.concat ", "
+    trans_type s complete (unsome proc_sym.sym_type) (c_name_of_sym proc_sym)
+    ^ "(" ^ String.concat ", "
         (List.map (fun (i, (cls, _)) ->
             trans s true cls;
             class_vtable_type s cls ^ " *cls" ^ string_of_int i ^ "_"
          ) (enumerate proc_sym.sym_tconstraints)
          @ List.map (fun param ->
             trans_type s complete (unsome param.sym_type)
-            ^ " " ^ (if is_param_by_value param then "" else "*")
-            ^ c_name_of_local param
+                ((if is_param_by_value param then "" else "*") ^ c_name_of_local param)
          ) (get_params proc_sym))
     ^ ")"
 
 (* Return the function pointer type for this class procedure. *)
 (* XXX: This is very similar to the above. *)
 and class_func_ptr_type s proc_sym inner =
-    (match proc_sym.sym_type with
-        | Some No_type -> "void"
-        | Some t -> trans_type s false t)
-    ^ " (*" ^ (if inner <> "" then " " ^ inner else "") ^ ")(" ^ String.concat ", "
+    trans_type s false (unsome proc_sym.sym_type)
+        ("(*" ^ (if inner <> "" then " " ^ inner else "") ^ ")(" ^ String.concat ", "
         (List.map (fun (cls, _) -> class_vtable_type s cls) proc_sym.sym_tconstraints
          @ List.map (fun param ->
             trans_type s false (unsome param.sym_type)
-            ^ (if is_param_by_value param then "" else "*")) (get_params proc_sym))
-    ^ ")"
+                (if is_param_by_value param then "" else "*")) (get_params proc_sym))
+    ^ ")")
 
 and trans_istmt s = function
     | Call(loc, proc_e, args, tbinds, classes) ->
@@ -245,8 +240,8 @@ and trans_iexpr s pointer_wanted iexpr =
             "*(" ^ trans_iexpr s false ptr ^ ")"
         | New(loc, ty, e) ->
             let tmp = new_temp s in
-            emit s (trans_type s false ty ^ " *" ^ c_temp_name tmp
-                ^ " = malloc(sizeof(" ^ trans_type s true ty ^ "));");
+            emit s (trans_type s false ty ("*" ^ c_temp_name tmp)
+                ^ " = malloc(sizeof(" ^ trans_type s true ty "" ^ "));");
             emit s ("*" ^ c_temp_name tmp ^ " = " ^ trans_iexpr s false e ^ ";");
             c_temp_name tmp
 
@@ -269,7 +264,7 @@ and trans s complete sym =
                                 | {sym_kind=Type_param} -> ()
                                 | {sym_kind=Var} as field ->
                                     emit s (trans_type s true (unsome field.sym_type)
-                                        ^ " " ^ c_name_of_local field ^ ";")
+                                        (c_name_of_local field) ^ ";")
                             ) sym.sym_locals
                         );
                         emit s "};"
@@ -277,9 +272,9 @@ and trans s complete sym =
                 | {sym_kind=Type_sym; sym_type=Some ty} ->
                     (* Type aliases aren't translated into C - translator
                        just uses the original type, so make sure that's declared. *)
-                    ignore (trans_type s complete ty)
+                    ignore (trans_type s complete ty "")
                 | {sym_kind=Var} ->
-                    emit s (trans_type s true (unsome sym.sym_type) ^ " " ^ c_name_of_var sym ^ ";")
+                    emit s (trans_type s true (unsome sym.sym_type) (c_name_of_var sym) ^ ";")
                 | {sym_kind=Proc} ->
                     if (not complete) || (match sym.sym_imported with | Some _ -> true | None -> false) then begin
                         emit s (func_prototype s false sym ^ ";")
@@ -303,16 +298,33 @@ and trans s complete sym =
         )
     end
 
-and trans_type s complete = function
-    | Boolean_type -> "bool"
-    | Integer_type -> "int"
-    | Char_type -> "char"
-    | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, _) ->
-        trans s complete type_sym;
-        c_name_of_type_sym type_sym
-    | Named_type({sym_kind=Type_sym; sym_type=Some ty}, _) ->
-        trans_type s complete ty
-    | Named_type({sym_kind=Type_param}, []) -> "void"
-    | Pointer_type(t) -> trans_type s false t ^ " *"
+(* trans_type returns a function that when given:
+    - "" -> will return the translated type
+    - s -> will return a declaration for s of the translated type. *)
+and trans_type s complete ty =
+    let r s name = if name = "" then s else (s ^ " " ^ name) in
+    match ty with
+        | No_type -> r "void"
+        | Boolean_type -> r "bool"
+        | Integer_type -> r "int"
+        | Char_type -> r "char"
+        | Named_type({sym_kind=Type_sym; sym_type=Some(Record_type _)} as type_sym, _) ->
+            trans s complete type_sym;
+            r (c_name_of_type_sym type_sym)
+        | Named_type({sym_kind=Type_sym; sym_type=Some ty}, _) ->
+            trans_type s complete ty
+        | Named_type({sym_kind=Type_param}, []) -> r "void"
+        | Pointer_type(t) ->
+            let t' = trans_type s false t in
+            (fun name -> t' ("*" ^ name))
+        | Proc_type(sym, []) ->
+            (* TODO: Type parameters! *)
+            let return_type = trans_type s false (unsome sym.sym_type) in
+            let param_types = String.concat ","
+                (List.map (fun param -> trans_type s false (unsome param.sym_type) "") (get_params sym)) in
+            begin function
+                | "" -> return_type ("(*)(" ^ param_types ^ ")")
+                | name -> return_type ("(* " ^ name ^ ")(" ^ param_types ^ ")")
+            end
 
 let translate s sym = trans s true sym
