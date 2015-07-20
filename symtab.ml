@@ -32,7 +32,7 @@ type symbol = {
     mutable sym_implementations: symbol list;
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
-    mutable sym_imported: bool;
+    mutable sym_imported: string option;
     mutable sym_abstract: bool;
     mutable sym_const: iexpr option;
     mutable sym_selected: bool;
@@ -99,7 +99,7 @@ let new_root_sym () =
         sym_implementations = [];
         sym_param_mode = Const_param;
         sym_code = None;
-        sym_imported = false;
+        sym_imported = None;
         sym_abstract = false;
         sym_const = None;
         sym_selected = false;
@@ -130,7 +130,7 @@ let create_sym parent loc name kind =
         sym_implementations = [];
         sym_param_mode = Const_param;
         sym_code = None;
-        sym_imported = false;
+        sym_imported = None;
         sym_abstract = false;
         sym_const = None;
         sym_selected = false;

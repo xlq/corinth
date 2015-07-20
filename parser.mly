@@ -56,6 +56,8 @@ ttype_inner:
             | _ -> Named_type(loc(), $1)
         }
     | ttype_inner LT type_args GT { Applied_type(loc(), $1, $3) }
+    | PROC opt_constrained_type_params LPAREN params RPAREN opt_type
+        { Proc_type(loc(), $2, $4, $6) }
 
 ttype:
     | ttype_inner { $1 }
@@ -95,8 +97,8 @@ decl:
     | PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type opt_implements IS proc_body END IDENT SEMICOLON
         { check_end (rhs_start_pos 2, $2) (rhs_start_pos 12, $12);
           Proc_decl(loc(), $2, $3, $5, $7, $8, $10) }
-    /*| PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type IS IMPORTED SEMICOLON
-        { Proc_import(loc(), $2, $3, $5, $7) }*/
+    | PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type opt_implements IS IMPORTED STRING SEMICOLON
+        { Proc_import(loc(), $2, $3, $5, $7, $8, $11) }
     | CONST IDENT ASSIGN expr SEMICOLON
         { Const_decl(loc(), $2, $4) }
     | CLASS IDENT LT type_params GT IS class_contents END IDENT SEMICOLON

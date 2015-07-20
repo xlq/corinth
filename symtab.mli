@@ -31,7 +31,7 @@ type symbol = {
     mutable sym_implementations: symbol list; (* List of Proc for Class_proc symbol (XXX: SCOPING RULES!) *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
-    mutable sym_imported: bool;
+    mutable sym_imported: string option;
     mutable sym_abstract: bool;
     mutable sym_const: iexpr option; (* definition of constants *)
     mutable sym_selected: bool;

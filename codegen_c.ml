@@ -92,7 +92,7 @@ let c_name_of_local sym = String.lowercase sym.sym_name
 
 let rec c_name_of_sym sym =
     match sym with
-        | {sym_kind=Proc; sym_imported=true} -> sym.sym_name
+        | {sym_kind=Proc; sym_imported=Some c_name} -> c_name
         | _ -> c_name_of_dotted_name (dotted_name_of_sym sym)
 
 and c_name_of_type_sym sym =
@@ -281,7 +281,7 @@ and trans s complete sym =
                 | {sym_kind=Var} ->
                     emit s (trans_type s true (unsome sym.sym_type) ^ " " ^ c_name_of_var sym ^ ";")
                 | {sym_kind=Proc} ->
-                    if not complete then begin
+                    if (not complete) || (match sym.sym_imported with | Some _ -> true | None -> false) then begin
                         emit s (func_prototype s false sym ^ ";")
                     end else begin
                         emit s (func_prototype s true sym);

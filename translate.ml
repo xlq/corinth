@@ -180,16 +180,18 @@ let rec subst_tparams tparams = function
     | Char_type -> Char_type
     | Pointer_type t -> Pointer_type (subst_tparams tparams t)
     | Named_type({sym_kind=Type_param} as param, []) as ty ->
-        match maybe_assq param tparams with
+        begin match maybe_assq param tparams with
             | Some ty -> ty
             | None -> ty
+        end
+    | Named_type(tsym, tbinds) -> Named_type(tsym, tbinds)
 
 (* Apply current type parameter substitutions. *)
 let follow_tparams ts = subst_tparams !(ts.ts_subst)
 
 (* Return the actual type (follow Named_type) *)
 let rec actual_type = function
-    | (Integer_type | Pointer_type _ | Record_type _) as t -> t
+    | (Integer_type | Char_type | Pointer_type _ | Record_type _) as t -> t
     | Named_type({sym_kind=Type_sym; sym_type=Some t}, _) -> t
 
 let rec same_type t1 t2 =
@@ -455,103 +457,28 @@ and trans_decl ts = function
             proc_sym.sym_translated <- true
         )
 
-    (*| Parse_tree.Proc_import(loc, name, type_params, params, return_type) ->
+    | Parse_tree.Proc_import(loc, name, constr_type_params, params, return_type, maybe_implements, c_name) ->
+        (* TODO: There is much in common with Proc_decl: merge! *)
         check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
-        let disp_tp = trans_type_params {ts with ts_scope = proc_sym} type_params true in
-        ignore disp_tp;
+        trans_constrained_type_params {ts with ts_scope = proc_sym} constr_type_params;
         trans_params ts proc_sym params return_type;
-        proc_sym.sym_imported <- true*)
-    (*| Parse_tree.Proc_override(loc, name, type_params, params, return_type, body) ->
-        begin match find_dotted_name ts loc name with
-            | {sym_kind=Proc} as base_proc ->
-                if not (is_dispatching base_proc) then
-                    Errors.semantic_error loc
-                        ("Cannot override non-dispatching procedure `"
-                            ^ name_for_error ts base_proc ^ "'.");
-                let proc_sym = create_sym ts.ts_scope loc "" Proc in
-                proc_sym.sym_base_proc <- Some base_proc;
-                begin match trans_type_params {ts with ts_scope = proc_sym} type_params true with
-                    | None -> ()
-                    | Some _ ->
-                        Errors.semantic_error loc
-                            ("Overriding procedure cannot declare a dispatching type parameter.")
-                end;
-                trans_params ts proc_sym params return_type;
-                (* Check that the overriding procedure is type-compatible with the base procedure. *)
-                let base_params = get_params base_proc in
-                let ovrd_params = get_params proc_sym in
-                if List.length base_params <> List.length ovrd_params then
-                    Errors.semantic_error loc
-                        ("Overriding procedure has "
-                            ^ (if List.length base_params < List.length ovrd_params then "more" else "fewer")
-                            ^ " parameters than procedure `"
-                            ^ name_for_error ts base_proc ^ "'.")
-                else begin
-                    List.iter (fun tp -> tp.sym_selected <- false) (get_type_params proc_sym);
-                    exi_quant_param ts base_proc (fun ts ->
-                        (* Parameter types must be an instance of the base's parameter types. *)
-                        List.iter2 (fun base_param ovrd_param ->
-                            if base_param.sym_name <> ovrd_param.sym_name then
-                                Errors.semantic_error (unsome ovrd_param.sym_defined)
-                                    ("Parameter name mismatch: `"
-                                        ^ ovrd_param.sym_name ^ "' should be called `"
-                                        ^ base_param.sym_name ^ "'.") else
-                            (* XXX: Probably need more strictness than coerce. *)
-                            expect_type ts (unsome ovrd_param.sym_defined)
-                                (unsome base_param.sym_type) "for overriding parameter"
-                                (unsome ovrd_param.sym_type)
-                        ) base_params ovrd_params;
-                        let dispatching_tp = get_dispatching_type_param base_proc in
-                        iter_type_params_in (fun tp ->
-                            if tp == dispatching_tp then begin
-                                (* occurs check fail! *)
-                                assert false
-                            end else begin
-                                if tp.sym_selected then begin
-                                    Errors.semantic_error loc
-                                        ("Overriding procedure constrains non-dispatching type parameter `"
-                                            ^ tp.sym_name ^ "' by overriding with type `"
-                                            ^ string_of_type (unsome dispatching_tp.sym_type) ^ "'.")
-                                    (* XXX: Say other type parameter name! *)
-                                    (* XXX: This is a horrible error message! I barely understand it! *)
-                                end
-                            end
-                        ) (unsome dispatching_tp.sym_type);
-                        (* Return type must also be an instance of the base's return type. *)
-                        (* XXX: Probably need more strictness than coerce. *)
-                        expect_type ts loc (unsome proc_sym.sym_type) "overriding return type"
-                            (unsome base_proc.sym_type)
-                    ) (fun v t ->
-                        assert (v.sym_kind == Type_param);
-                        if v.sym_dispatching then begin
-                            match t with
-                                | Named_type({sym_kind=Type_param; sym_parent=p; sym_name=new_name}, _) when p == proc_sym ->
-                                    Errors.semantic_error loc
-                                        ("Overriding procedure doesn't specialise dispatching type parameter `" ^ v.sym_name
-                                         ^ (if v.sym_name = new_name then "'."
-                                            else "', it just renames it to `" ^ new_name ^ "'."))
-                                | _ ->
-                                    (* Dispatching type parameter is specialised for t. *)
-                                    base_proc.sym_overrides <- (proc_sym, t) :: base_proc.sym_overrides
-                        end else begin
-                            (* Non-dispatching type params can't introduce constraints,
-                               so there should be a mapping from overriding type params
-                               to base params. *)
-                            match t with
-                                | Named_type({sym_kind=Type_param; sym_parent=p; sym_name=new_name} as tp, _) when p == proc_sym ->
-                                    tp.sym_selected <- true
-                                | _ ->
-                                    Errors.semantic_error loc
-                                        ("Overriding procedure specialises non-dispatching type parameter `"
-                                         ^ v.sym_name ^ "'.")
-                        end
-                    );
-                    todo ts (Todo_proc(body, proc_sym))
-                end
-            | bad_sym -> wrong_sym_kind ts loc bad_sym "dispatching procedure"
-        end
-        *)
+        proc_sym.sym_imported <- Some c_name;
+        todo ts Todo_proc (fun () ->
+            begin match maybe_implements with
+                | None -> ()
+                | Some name ->
+                    match find_dotted_name ts loc name with
+                        | ({sym_kind=Class_proc} as cls_proc), [] ->
+                            assert (cls_proc.sym_parent.sym_kind = Class);
+                            ignore (exi_quant_param ts cls_proc.sym_parent (fun ts ->
+                                check_func_is_instance ts loc cls_proc proc_sym
+                            ));
+                            cls_proc.sym_implementations <- proc_sym :: cls_proc.sym_implementations
+                        | bad_sym, _ -> wrong_sym_kind ts loc bad_sym "class proc" (* TODO: better loc *)
+            end
+        )
+
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Type_alias(other)) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let other = trans_type ts other in

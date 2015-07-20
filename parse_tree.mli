@@ -20,7 +20,7 @@ and decl =
         * ttype option (* return type *)
         * dotted_name option (* implements *)
         * stmt list
-    | Proc_import of loc * string * type_param list * param list * ttype option
+    | Proc_import of loc * string * constrained_type_params * param list * ttype option * dotted_name option * string
     | Const_decl of loc * string * expr
     | Class_decl of loc * string * type_param list * class_item list
 
@@ -40,6 +40,7 @@ and ttype =
     | Named_type of loc * dotted_name
     | Applied_type of loc * ttype * ttype args
     | Pointer_type of ttype
+    | Proc_type of loc * constrained_type_params * param list * ttype option
 
 and stmt =
     | Decl of decl
