@@ -209,16 +209,17 @@ let rec same_type t1 t2 =
 
 exception Type_mismatch
 
-let rec type_check ts t1 t2 =
+(* if exact is true, only allow alpha renaming *)
+let rec type_check ts exact t1 t2 =
     match t1, t2 with
         | t1, t2 when t1 == t2 -> () (* short-cut if the types are exactly the same *)
         | No_type, No_type -> ()
-        | Pointer_type(t1), Pointer_type(t2) -> type_check ts t1 t2
+        | Pointer_type(t1), Pointer_type(t2) -> type_check ts exact t1 t2
         | Named_type(s1, params1), Named_type(s2, params2) when s1 == s2 ->
             (* Same symbol. Type params must match too. *)
             List.iter2 (fun (param1, t1) (param2, t2) ->
                 assert (param1 == param2);
-                type_check ts t1 t2
+                type_check ts exact t1 t2
             ) params1 params2
 
         (* Type parameters. *)
@@ -227,9 +228,9 @@ let rec type_check ts t1 t2 =
           Named_type({sym_kind=Type_param} as tp2, []) ->
             (* Type parameters on both sides. *)
             begin match maybe_assq tp1 !(ts.ts_subst) with
-                | Some t1 -> type_check ts t1 t2 (* apply current substitution to t1 *)
+                | Some t1 -> type_check ts exact t1 t2 (* apply current substitution to t1 *)
                 | None -> match maybe_assq tp2 !(ts.ts_subst) with
-                    | Some t2 -> type_check ts t1 t2 (* apply current substitution to t2 *)
+                    | Some t2 -> type_check ts exact t1 t2 (* apply current substitution to t2 *)
                     | None ->
                         if List.memq tp2.sym_parent ts.ts_exi_quants then
                             (* perform substitution in the direction that will work
@@ -240,13 +241,15 @@ let rec type_check ts t1 t2 =
                             substitute ts tp1 t2 Type_mismatch
             end
         | Named_type({sym_kind=Type_param} as tp, []), t2 ->
+            if exact then raise Type_mismatch else
             begin match maybe_assq tp !(ts.ts_subst) with
-                | Some t1 -> type_check ts t1 t2 (* apply current substitution *)
+                | Some t1 -> type_check ts exact t1 t2 (* apply current substitution *)
                 | None -> substitute ts tp t2 Type_mismatch (* substitute to make types match *)
             end
         | t1, Named_type({sym_kind=Type_param} as tp, []) ->
+            if exact then raise Type_mismatch else
             begin match maybe_assq tp !(ts.ts_subst) with
-                | Some t2 -> type_check ts t1 t2 (* apply current substitution *)
+                | Some t2 -> type_check ts exact t1 t2 (* apply current substitution *)
                 | None -> substitute ts tp t1 Type_mismatch (* substitute to make types match *)
             end
 
@@ -264,15 +267,15 @@ let rec type_check ts t1 t2 =
             else begin
                 List.iter2 (fun param1 param2 ->
                     (* TODO: Check parameter names! *)
-                    type_check ts (unsome param1.sym_type) (unsome param2.sym_type)
+                    type_check ts exact (unsome param1.sym_type) (unsome param2.sym_type)
                 ) params1 params2;
-                type_check ts (unsome s1.sym_type) (unsome s2.sym_type) (* return types *)
+                type_check ts exact (unsome s1.sym_type) (unsome s2.sym_type) (* return types *)
             end
 
         (* Type aliases. *)
         | Named_type({sym_kind=Type_sym; sym_type=Some t1}, []), t2
         | t1, Named_type({sym_kind=Type_sym; sym_type=Some t2}, []) ->
-            type_check ts t1 t2
+            type_check ts exact t1 t2
         (* Type mismatches. *)
         | No_type, _ | _, No_type
         | Integer_type, _ | _, Integer_type
@@ -298,7 +301,7 @@ let check_func_is_instance ts loc fsym1 fsym2 =
         end;
         (* TODO: Better matching for errors? (Try to find one with correct name on name mismatch, etc. *)
         List.iter2 (fun param1 param2 ->
-            begin try type_check ts (unsome param1.sym_type) (unsome param2.sym_type)
+            begin try type_check ts false (unsome param1.sym_type) (unsome param2.sym_type)
             with Type_mismatch ->
                 Errors.semantic_error loc ("Parameter `" ^ param2.sym_name ^ "' of " ^ describe_sym fsym2 ^ " `"
                     ^ name_for_error ts fsym2 ^ "' has type `"
@@ -313,7 +316,7 @@ let check_func_is_instance ts loc fsym1 fsym2 =
     ) in ()
 
 let expect_type ts loc target_type why_target source_type =
-    try type_check ts target_type source_type
+    try type_check ts false target_type source_type
     with Type_mismatch ->
         Errors.semantic_error loc
             ("Type mismatch " ^ why_target ^ ": expected `"
@@ -321,7 +324,7 @@ let expect_type ts loc target_type why_target source_type =
                 ^ "' but got `" ^ string_of_type source_type ^ "'.")
 
 let match_types ts loc t1 t2 =
-    try type_check ts t1 t2
+    try type_check ts false t1 t2
     with Type_mismatch ->
         Errors.semantic_error loc
             ("Incompatible types: `"
@@ -850,53 +853,67 @@ and trans_expr ts (target_type: ttype option) = function
                 let expr = Apply(loc, proc, matched_args, tbinds, classes) in
                 todo ts Todo_apply_check (fun () ->
                     classes := List.map (fun (cls, cls_args) ->
-                        fst (unif_ctx ts (fun ts ->
-                            (* Substitute class arguments. *)
-                            activate ts (List.map (fun (tp, ty) -> (tp, subst_tparams tbinds ty)) cls_args);
-                            (cls,
-                            (* Check all class procs. *)
-                            List.map (fun cls_proc ->
-                                (* Find implementation candidates.
-                                   TODO: Proper scope rules! *)
-                                let cls_params = get_params cls_proc in
-                                let candidates = List.fold_left (fun candidates impl ->
-                                    let impl_params = get_params impl in
-                                    try
-                                        ignore (exi_quant_param ts impl (fun ts ->
-                                            List.iter2 (fun cls_param impl_param ->
-                                                prerr_endline ("Checking " ^ string_of_type (unsome cls_param.sym_type)
-                                                    ^ " against " ^ string_of_type (unsome impl_param.sym_type));
-                                                type_check ts
-                                                    (unsome cls_param.sym_type)
-                                                    (unsome impl_param.sym_type)
-                                            ) cls_params impl_params;
-                                            type_check ts
-                                                (unsome cls_proc.sym_type)
-                                                (unsome impl.sym_type)
-                                        ));
-                                        (impl (*, instantiation*))::candidates
-                                    with Type_mismatch -> candidates
-                                ) [] cls_proc.sym_implementations in
-                                (* TODO: Eliminate more general candidates. *)
-                                match candidates with
-                                    | [] ->
-                                        Errors.semantic_error loc
-                                            ("No implementation of `"
-                                                ^ name_for_error ts cls_proc ^ "' found.");
-                                        raise Errors.Compile_error
-                                    | _::_::_ ->
-                                        Errors.semantic_error loc
-                                            ("Multiple implementations of `"
-                                                ^ name_for_error ts cls_proc ^ "' match the types.");
-                                        List.iter (fun candidate ->
-                                            Errors.semantic_error (unsome candidate.sym_defined)
-                                                ("`" ^ name_for_error ts candidate ^ "' matches.")
-                                        ) candidates;
-                                        raise Errors.Compile_error
-                                    | [impl (*, instantiation*)] ->
-                                        (cls_proc, impl)
-                            ) (List.filter (is_kind Class_proc) cls.sym_locals))
-                        ))
+                        (* Can we find a class to pass on to the callee? *)
+                        match maybe_find (fun (i, (cls', cls_args')) ->
+                            try ignore (unif_ctx ts (fun ts ->
+                                activate ts (List.map (fun (tp, ty) -> (tp, subst_tparams tbinds ty)) cls_args);
+                                activate ts cls_args';
+                                List.iter2 (fun tp tp' ->
+                                    type_check ts true (Named_type(tp, [])) (Named_type(tp, []))
+                                ) (get_type_params cls) (get_type_params cls')
+                            )); true with Type_mismatch -> false
+                        ) ( (* Look in current scope's constraints for classes to look at. *)
+                            enumerate ts.ts_scope.sym_tconstraints )
+                        with
+                            | Some (i, _) -> Forward i
+                            | None ->
+                                (* Cannot forward - must implement the class ourself. *)
+                                fst (unif_ctx ts (fun ts ->
+                                    (* Substitute class arguments. *)
+                                    activate ts (List.map (fun (tp, ty) -> (tp, subst_tparams tbinds ty)) cls_args);
+                                    (* Check all class procs. *)
+                                    Implement(cls, List.map (fun cls_proc ->
+                                        (* Find implementation candidates.
+                                           TODO: Proper scope rules! *)
+                                        let cls_params = get_params cls_proc in
+                                        let candidates = List.fold_left (fun candidates impl ->
+                                            let impl_params = get_params impl in
+                                            try
+                                                ignore (exi_quant_param ts impl (fun ts ->
+                                                    List.iter2 (fun cls_param impl_param ->
+                                                        prerr_endline ("Checking " ^ string_of_type (unsome cls_param.sym_type)
+                                                            ^ " against " ^ string_of_type (unsome impl_param.sym_type));
+                                                        type_check ts false
+                                                            (unsome cls_param.sym_type)
+                                                            (unsome impl_param.sym_type)
+                                                    ) cls_params impl_params;
+                                                    type_check ts false
+                                                        (unsome cls_proc.sym_type)
+                                                        (unsome impl.sym_type)
+                                                ));
+                                                (impl (*, instantiation*))::candidates
+                                            with Type_mismatch -> candidates
+                                        ) [] cls_proc.sym_implementations in
+                                        (* TODO: Eliminate more general candidates. *)
+                                        match candidates with
+                                            | [] ->
+                                                Errors.semantic_error loc
+                                                    ("No implementation of `"
+                                                        ^ name_for_error ts cls_proc ^ "' found.");
+                                                raise Errors.Compile_error
+                                            | _::_::_ ->
+                                                Errors.semantic_error loc
+                                                    ("Multiple implementations of `"
+                                                        ^ name_for_error ts cls_proc ^ "' match the types.");
+                                                List.iter (fun candidate ->
+                                                    Errors.semantic_error (unsome candidate.sym_defined)
+                                                        ("`" ^ name_for_error ts candidate ^ "' matches.")
+                                                ) candidates;
+                                                raise Errors.Compile_error
+                                            | [impl (*, instantiation*)] ->
+                                                (cls_proc, impl)
+                                    ) (List.filter (is_kind Class_proc) cls.sym_locals))
+                                ))
                     ) proc_sym.sym_tconstraints
                 );
                 (expr, return_type, false)

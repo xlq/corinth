@@ -56,9 +56,13 @@ and ttype =
 
 and tbinds = (symbol * ttype) list
 
+and classarg =
+    | Implement of symbol * (symbol * symbol) list
+    | Forward of int
+
 and istmt =
     | Call of loc * iexpr * (symbol * iexpr) list * tbinds
-            * (symbol * (symbol * symbol) list) list ref
+            * classarg list ref
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
     | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
@@ -72,7 +76,7 @@ and iexpr =
     | Dispatch of int * symbol * tbinds
     | Apply of loc * iexpr * (symbol * iexpr) list (* parameter bindings *)
                            * tbinds (* type parameter bindings *)
-                           * (symbol * (symbol * symbol) list) list ref (* classes *)
+                           * classarg list ref (* classes *)
     | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr

@@ -112,6 +112,8 @@ and c_name_of_var sym =
 
 and class_vtable_type s cls = "struct " ^ c_name_of_sym cls ^ "__VTABLE"
 
+let c_name_of_class_param i = "cls" ^ string_of_int i ^ "_"
+
 let rec is_scalar = function
     | Boolean_type -> true
     | Char_type -> true
@@ -132,7 +134,7 @@ let rec func_prototype s complete proc_sym =
     ^ "(" ^ String.concat ", "
         (List.map (fun (i, (cls, _)) ->
             trans s true cls;
-            class_vtable_type s cls ^ " *cls" ^ string_of_int i ^ "_"
+            class_vtable_type s cls ^ " *" ^ c_name_of_class_param i
          ) (enumerate proc_sym.sym_tconstraints)
          @ List.map (fun param ->
             trans_type s complete (unsome param.sym_type)
@@ -207,13 +209,16 @@ and trans_iexpr s pointer_wanted iexpr =
         | Apply(loc, proc_e, args, tbinds, classes) ->
             v (trans_iexpr s false proc_e ^ "("
             ^ String.concat ", "
-                (List.map (fun (cls, procs) ->
-                    "&(" ^ class_vtable_type s cls ^ "){"
-                    ^ String.concat ", "
-                        (List.map (fun (cls_proc, impl) ->
-                            "(" ^ class_func_ptr_type s cls_proc ""
-                                ^ ") " ^ c_name_of_sym impl) procs)
-                    ^ "}") !classes
+                (List.map (function
+                    | Implement(cls, procs) ->
+                        "&(" ^ class_vtable_type s cls ^ "){"
+                        ^ String.concat ", "
+                            (List.map (fun (cls_proc, impl) ->
+                                "(" ^ class_func_ptr_type s cls_proc ""
+                                    ^ ") " ^ c_name_of_sym impl) procs)
+                        ^ "}"
+                    | Forward i -> c_name_of_class_param i
+                ) !classes
                  @ List.map (fun (param, arg) ->
                     trans_iexpr s (not (is_param_by_value param)) arg) args) ^ ")")
         | Binop(loc, lhs, op, rhs) ->
