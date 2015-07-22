@@ -68,7 +68,7 @@ let new_state root =
         s_lines = [];
     } in
     open_scope s root (fun s ->
-        emit s "local function copy(x)";
+        emit s "local function rv(x)";
         emit s "    if type(x) == \"table\" then";
         emit s "        local y = {}";
         emit s "        for k, v in pairs(x) do";
@@ -139,17 +139,18 @@ let rec return_list s proc_sym =
       ) (get_params proc_sym))
 
 and trans_iexpr s mut iexpr =
+    let v x = if mut then x else "rv(" ^ x ^ ")" in
     match iexpr with
         | Name(loc, ({sym_kind=Param; sym_param_mode=Const_param} as sym)) ->
             assert (not mut);
-            lua_name_of_var sym
+            v (lua_name_of_var sym)
         | Name(loc, ({sym_kind=Param; sym_param_mode=(Var_param|Out_param)} as sym)) ->
             lua_name_of_var sym
         | Name(loc, {sym_kind=Const; sym_const=Some e}) ->
             trans_iexpr s mut e
         | Name(loc, sym) ->
             trans s true sym;
-            lua_name_of_var sym
+            v (lua_name_of_var sym)
         | Int_literal(loc, n) ->
             string_of_big_int n
         | String_literal(loc, s) ->
@@ -205,7 +206,9 @@ and trans_iexpr s mut iexpr =
         | Field_access(loc, lhs, field) ->
             "(" ^ (trans_iexpr s mut lhs) ^ ")." ^ lua_name_of_local field
         | New(loc, ty, e) ->
-            "copy(" ^ trans_iexpr s false e ^ ")"
+            "{rv(" ^ trans_iexpr s false e ^ ")}"
+        | Deref(loc, ptr) ->
+            trans_iexpr s false ptr ^ "[1]"
         | Genericify(e, _) -> trans_iexpr s mut e
 
 
@@ -213,7 +216,7 @@ and trans_istmt s = function
     | Call(loc, proc_e, args, tbinds, classes) ->
         emit s (trans_iexpr s false (Apply(loc, proc_e, args, tbinds, classes)) ^ ";")
     | Assign(loc, dest, src) ->
-        emit s (trans_iexpr s false dest ^ " = " ^ trans_iexpr s false src ^ ";")
+        emit s (trans_iexpr s true dest ^ " = " ^ trans_iexpr s false src ^ ";")
     | Return(loc, None) ->
         emit s ("return " ^ String.concat ", " (return_list s s.s_scope))
     | Return(loc, Some e) ->
