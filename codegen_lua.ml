@@ -9,6 +9,7 @@ type state = {
     s_scope_indent: int;            (* indent level of this scope *)
     mutable s_current_indent: int;  (* current indent level *)
     mutable s_lines: string list;   (* lines of Lua code (reverse order) *)
+    s_temp_counter: int ref;
 }
 
 let indent s f =
@@ -35,6 +36,7 @@ let open_scope s scope f =
         s_scope_indent = appropriate_state.s_scope_indent + 1;
         s_current_indent = appropriate_state.s_scope_indent + 1; (* not an error - we start again at the indentation level of the parent scope *)
         s_lines = [];
+        s_temp_counter = s.s_temp_counter;
     } in
     let result = f new_state in (* if it fails, we discard the lines it produced *)
     let lines = new_state.s_lines in
@@ -66,6 +68,7 @@ let new_state root =
         s_scope_indent = -1;
         s_current_indent = 0;
         s_lines = [];
+        s_temp_counter = ref 0;
     } in
     open_scope s root (fun s ->
         emit s "local function rv(x)";
@@ -113,6 +116,12 @@ and lua_name_of_var sym =
 
 let lua_name_of_class_param i = "cls" ^ string_of_int i ^ "_"
 
+let temp i = "tmp" ^ string_of_int i ^ "_"
+
+let new_temp s =
+    s.s_temp_counter := !(s.s_temp_counter) + 1;
+    !(s.s_temp_counter)
+
 let rec is_scalar = function
     | Boolean_type -> true
     | Char_type -> true
@@ -126,17 +135,60 @@ let rec is_scalar = function
 let rec func_prototype s proc_sym =
     "function (" ^ String.concat ", "
         (List.map
-            (fun (i, _) -> lua_name_of_class_param i)
-          (enumerate proc_sym.sym_tconstraints)
+         (fun (i, _) -> lua_name_of_class_param i)
+         (enumerate proc_sym.sym_tconstraints)
          @ List.map lua_name_of_local (get_params proc_sym))
-      ^ ")"
+        ^ ")"
 
 let rec return_list s proc_sym =
     List.map lua_name_of_local
-      (List.filter (function
-        | {sym_kind=Param; sym_param_mode=Const_param} -> false
-        | {sym_kind=Param; sym_param_mode=Var_param|Out_param} -> true
-      ) (get_params proc_sym))
+        (List.filter (function
+                      | {sym_kind=Param; sym_param_mode=Const_param} -> false
+                      | {sym_kind=Param; sym_param_mode=Var_param|Out_param} -> true
+                     ) (get_params proc_sym))
+
+and trans_call s (returns: bool) iexpr =
+    match iexpr with Apply(loc, proc_e, args, tbinds, classes) ->
+    let replacements = ref [] in
+    let translated = trans_iexpr s false proc_e ^ "("
+        ^ String.concat ", "
+            (List.map (function
+                | Implement(cls, procs) ->
+                    "{" ^ String.concat ", "
+                        (List.map (fun (cls_proc, impl) ->
+                            lua_name_of_local cls_proc ^ " = " ^ lua_name_of_sym impl
+                            ) procs) ^ "}"
+                | Forward i -> lua_name_of_class_param i
+              ) !classes
+               @ List.map (fun (param, arg) ->
+                match param.sym_param_mode with
+                    | Const_param -> trans_iexpr s true arg
+                    | Var_param | Out_param ->
+                        let arg' = trans_iexpr s true arg in
+                        replacements := arg' :: !replacements;
+                        arg'
+                ) args)
+        ^ ")"
+    in
+    if !replacements <> [] then begin
+        if returns then begin
+            let result = new_temp s in
+            emit s ("local " ^ temp result);
+            (* XXX: Incorrect: args might have side-effects so can't be repeated! *)
+            emit s (String.concat ", " (List.rev !replacements) ^ ", " ^ temp result ^ " = " ^ translated);
+            temp result
+        end else begin
+            emit s (String.concat ", " (List.rev !replacements) ^ " = " ^ translated ^ ";");
+            ""
+        end
+    end else begin
+        if returns then begin
+            translated
+        end else begin
+            emit s translated;
+            ""
+        end
+    end
 
 and trans_iexpr s mut iexpr =
     let v x = if mut then x else "rv(" ^ x ^ ")" in
@@ -157,34 +209,8 @@ and trans_iexpr s mut iexpr =
             "\"" ^ s ^ "\""
         | Dispatch(index, cls_proc, tbinds) ->
             lua_name_of_class_param index ^ "." ^ lua_name_of_local cls_proc
-        | Apply(loc, proc_e, args, tbinds, classes) ->
-            let replacements = ref [] in
-            let translated =
-            trans_iexpr s false proc_e ^ "("
-                ^ String.concat ", "
-                    (List.map (function
-                        | Implement(cls, procs) ->
-                            "{" ^ String.concat ", "
-                                (List.map (fun (cls_proc, impl) ->
-                                    lua_name_of_local cls_proc ^ " = " ^ lua_name_of_sym impl
-                                    ) procs) ^ "}"
-                        | Forward i -> lua_name_of_class_param i
-                      ) !classes
-                       @ List.map (fun (param, arg) ->
-                        match param.sym_param_mode with
-                            | Const_param -> trans_iexpr s false arg
-                            | Var_param | Out_param ->
-                                let arg' = trans_iexpr s true arg in
-                                replacements := arg' :: !replacements;
-                                arg'
-                        ) args)
-                ^ ")"
-            in
-            if !replacements <> [] then begin
-                (* XXX: Ugly and wrong! (Argument might cause side-effects.) *)
-                "(function() local _result_; "
-                    ^ String.concat ", " (List.rev !replacements) ^ ", _result_ = " ^ translated ^ "; return _result_; end)()"
-            end else translated
+        | Apply _ ->
+            trans_call s true iexpr
         | Binop(loc, lhs, op, rhs) ->
             "(" ^ trans_iexpr s false lhs ^ ") "
                 ^ (match op with
@@ -211,10 +237,9 @@ and trans_iexpr s mut iexpr =
             trans_iexpr s false ptr ^ "[1]"
         | Genericify(e, _) -> trans_iexpr s mut e
 
-
 and trans_istmt s = function
     | Call(loc, proc_e, args, tbinds, classes) ->
-        emit s (trans_iexpr s false (Apply(loc, proc_e, args, tbinds, classes)) ^ ";")
+        ignore (trans_call s false (Apply(loc, proc_e, args, tbinds, classes)))
     | Assign(loc, dest, src) ->
         emit s (trans_iexpr s true dest ^ " = " ^ trans_iexpr s false src ^ ";")
     | Return(loc, None) ->
@@ -252,10 +277,10 @@ and trans s complete sym =
                 match sym with
                     | {sym_kind=Type_sym} -> ()
                     | {sym_kind=Var} ->
-                        if not complete then emit s ("local " ^ lua_name_of_var sym ^ ";")
+                        if not complete then emit s ("local " ^ lua_name_of_var sym)
                     | {sym_kind=Proc; sym_imported=None} ->
                         if not complete then begin
-                            emit s ("local " ^ lua_name_of_sym sym ^ ";")
+                            emit s ("local " ^ lua_name_of_sym sym)
                         end else begin
                             emit s (lua_name_of_sym sym ^ " = " ^ func_prototype s sym);
                             indent s (fun s ->
@@ -264,8 +289,11 @@ and trans s complete sym =
                                     | [] -> false
                                     | [Return _] -> true
                                     | _::rest -> check_for_return rest
-                                in if not (check_for_return (unsome sym.sym_code)) then
-                                    emit s ("return " ^ String.concat ", " (return_list s sym))
+                                in if not (check_for_return (unsome sym.sym_code)) then begin
+                                    match return_list s sym with
+                                        | [] -> ()
+                                        | returns -> emit s ("return " ^ String.concat ", " returns)
+                                end
                             );
                             emit s "end"
                         end
