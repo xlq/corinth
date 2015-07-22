@@ -379,7 +379,7 @@ let rec loc_of_expr = function
     | Parse_tree.Apply(loc, _, _) -> loc
 
 let rec loc_of_iexpr = function
-    | Name(loc, _) -> loc
+    | Name(loc, _)
     | Int_literal(loc, _)
     | String_literal(loc, _)
     | Char_literal(loc, _)
@@ -390,6 +390,7 @@ let rec loc_of_iexpr = function
     | Deref(loc, _)
     | New(loc, _, _)
         -> loc
+    | Genericify(e,_) -> loc_of_iexpr e
 
 let rec trans_unit ts = function
     | Parse_tree.Unit(loc, [name], decls) ->
@@ -829,8 +830,14 @@ and trans_expr ts (target_type: ttype option) = function
                     (* Match arguments to parameters and coerce types
                        (thus substituting the callee's type parameters). *)
                     List.map (fun (param, arg) ->
-                        assert (present param.sym_type);
-                        let arg, arg_type, lvalue = trans_expr ts param.sym_type arg in
+                        let param_type = unsome param.sym_type in
+                        let arg, arg_type, lvalue = trans_expr ts (Some param_type) arg in
+                        let arg = match param_type, arg_type with
+                            | Named_type({sym_kind=Type_param},[]), Named_type({sym_kind=Type_param},[]) -> arg
+                            | Named_type({sym_kind=Type_param},[]), _ ->
+                                (* Back-end might need to know that this value becomes generic at this point. *)
+                                Genericify(arg, arg_type)
+                            | _ -> arg in
                         begin match param.sym_param_mode with
                             | Var_param | Out_param ->
                                 if not lvalue then begin

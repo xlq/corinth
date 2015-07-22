@@ -82,6 +82,7 @@ and iexpr =
     | Binop of loc * iexpr * binop * iexpr
     | Deref of loc * iexpr
     | New of loc * ttype * iexpr
+    | Genericify of iexpr * ttype
 
 let dummy_loc = {
     Lexing.pos_fname = "<built-in>";

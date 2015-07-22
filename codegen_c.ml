@@ -71,6 +71,7 @@ let new_state root =
     } in
     open_scope s root (fun s ->
         emit s "#include <stdbool.h>";
+        emit s "#include <stdint.h>";
         emit s "#include <stdlib.h>"
     );
     s
@@ -220,7 +221,12 @@ and trans_iexpr s pointer_wanted iexpr =
                     | Forward i -> c_name_of_class_param i
                 ) !classes
                  @ List.map (fun (param, arg) ->
-                    trans_iexpr s (not (is_param_by_value param)) arg) args) ^ ")")
+                    match arg with
+                        | Genericify(e, ty) when is_scalar ty ->
+                            "(void *)(uintptr_t) " ^ trans_iexpr s false arg
+                        | _ ->
+                            trans_iexpr s (not (is_param_by_value param)) arg
+                    ) args) ^ ")")
         | Binop(loc, lhs, op, rhs) ->
             v ("(" ^ trans_iexpr s false lhs ^ ") "
                 ^ (match op with
@@ -249,6 +255,7 @@ and trans_iexpr s pointer_wanted iexpr =
                 ^ " = malloc(sizeof(" ^ trans_type s true ty "" ^ "));");
             emit s ("*" ^ c_temp_name tmp ^ " = " ^ trans_iexpr s false e ^ ";");
             c_temp_name tmp
+        | Genericify(e,_) -> trans_iexpr s pointer_wanted e
 
 and trans s complete sym =
     (* Already translated? *)
