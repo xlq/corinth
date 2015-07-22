@@ -257,7 +257,12 @@ and trans s complete sym =
                             emit s (lua_name_of_sym sym ^ " = " ^ func_prototype s sym);
                             indent s (fun s ->
                                 trans_istmts s (unsome sym.sym_code);
-                                emit s ("return " ^ String.concat ", " (return_list s sym))
+                                let rec check_for_return = function
+                                    | [] -> false
+                                    | [Return _] -> true
+                                    | _::rest -> check_for_return rest
+                                in if not (check_for_return (unsome sym.sym_code)) then
+                                    emit s ("return " ^ String.concat ", " (return_list s sym))
                             );
                             emit s "end"
                         end
