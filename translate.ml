@@ -996,6 +996,6 @@ let finish_trans ts unit =
     done;
         
     (* XXX: Don't do this here! *)
-    let c_state = Codegen_c.new_state ts.ts_root in
-    List.iter (Codegen_c.translate c_state)
+    let c_state = Codegen_lua.new_state ts.ts_root in
+    List.iter (Codegen_lua.translate c_state)
         (List.filter (is_kind Proc) unit.sym_locals)
