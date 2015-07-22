@@ -307,10 +307,10 @@ let check_func_is_instance ts loc fsym1 fsym2 =
         (* TODO: Better matching for errors? (Try to find one with correct name on name mismatch, etc. *)
         List.iter2 (fun param1 param2 ->
             if param1.sym_param_mode <> param2.sym_param_mode then begin
-                Errors.semantic_error loc
+                Errors.semantic_error (unsome param2.sym_defined)
                     ("Parameter `" ^ name_for_error ts param2 ^ "' is " ^ param_mode_name param2.sym_param_mode
                         ^ " but...");
-                Errors.semantic_error (unsome fsym1.sym_defined)
+                Errors.semantic_error (unsome param1.sym_defined)
                     ("parameter `" ^ name_for_error ts param1 ^ "' is " ^ param_mode_name param1.sym_param_mode ^ ".");
                 raise Errors.Compile_error
             end;
@@ -325,7 +325,32 @@ let check_func_is_instance ts loc fsym1 fsym2 =
                 raise Errors.Compile_error
             end
             (* TODO: Check names -> issue a warning? *)
-        ) params1 params2
+        ) params1 params2;
+        (* Check return type. *)
+        match unsome fsym1.sym_type, unsome fsym2.sym_type with
+            | No_type, No_type -> ()
+            | No_type, _ ->
+                Errors.semantic_error loc (String.capitalize (describe_sym fsym2) ^ " `"
+                    ^ name_for_error ts fsym2 ^ "' returns a value, but...");
+                Errors.semantic_error (unsome fsym1.sym_defined) (describe_sym fsym1 ^ "`"
+                    ^ name_for_error ts fsym1 ^ "' does not.");
+                raise Errors.Compile_error
+            | _, No_type ->
+                Errors.semantic_error loc (String.capitalize (describe_sym fsym2) ^ " `"
+                    ^ name_for_error ts fsym2 ^ "' does not return a value, but...");
+                Errors.semantic_error (unsome fsym1.sym_defined) (describe_sym fsym1 ^ "`"
+                    ^ name_for_error ts fsym1 ^ "' does.");
+                raise Errors.Compile_error
+            | t1, t2 ->
+                try type_check ts false t1 t2
+                with Type_mismatch ->
+                    Errors.semantic_error loc (String.capitalize (describe_sym fsym2) ^ " `"
+                        ^ name_for_error ts fsym2 ^ "' returns type `" ^ string_of_type t2
+                        ^ "', but...");
+                    Errors.semantic_error (unsome fsym1.sym_defined)
+                        (describe_sym fsym1 ^ " `" ^ name_for_error ts fsym1 ^ "' returns type `"
+                            ^ string_of_type t1 ^ "'.");
+                    raise Errors.Compile_error
     ) in ()
 
 let expect_type ts loc target_type why_target source_type =
