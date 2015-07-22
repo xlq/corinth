@@ -46,6 +46,11 @@ let emit ts x =
         | None -> assert false
         | Some code -> code := (!code) @ [x] (* XXX: horribly inefficient *)
 
+let param_mode_name = function
+    | Const_param -> "an input parameter"
+    | Var_param -> "a `var' parameter"
+    | Out_param -> "a `out' parameter"
+
 (* Return the name of the given symbol suitable for an error message. *)
 let name_for_error ts sym =
     if (sym_is_grandchild ts.ts_scope sym) || (ts.ts_scope == sym) then sym.sym_name
@@ -301,6 +306,14 @@ let check_func_is_instance ts loc fsym1 fsym2 =
         end;
         (* TODO: Better matching for errors? (Try to find one with correct name on name mismatch, etc. *)
         List.iter2 (fun param1 param2 ->
+            if param1.sym_param_mode <> param2.sym_param_mode then begin
+                Errors.semantic_error loc
+                    ("Parameter `" ^ name_for_error ts param2 ^ "' is " ^ param_mode_name param2.sym_param_mode
+                        ^ " but...");
+                Errors.semantic_error (unsome fsym1.sym_defined)
+                    ("parameter `" ^ name_for_error ts param1 ^ "' is " ^ param_mode_name param1.sym_param_mode ^ ".");
+                raise Errors.Compile_error
+            end;
             begin try type_check ts false (unsome param1.sym_type) (unsome param2.sym_type)
             with Type_mismatch ->
                 Errors.semantic_error loc ("Parameter `" ^ param2.sym_name ^ "' of " ^ describe_sym fsym2 ^ " `"
