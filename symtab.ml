@@ -53,6 +53,7 @@ and ttype =
     | Pointer_type of ttype
     | Record_type of symbol option
     | Proc_type of symbol * tbinds
+    | Enum_type of symbol list
 
 and tbinds = (symbol * ttype) list
 
@@ -175,6 +176,8 @@ let rec string_of_type_int substs = function
                 param.sym_name ^ "=" ^ string_of_type_int substs arg) args) ^ ">"
     | Pointer_type t -> "^" ^ string_of_type_int substs t
     | Proc_type _ -> "<proc type>"
+    | Enum_type elements ->
+        "(" ^ String.concat ", " (List.map (fun s -> s.sym_name) elements) ^ ")"
 
 let string_of_type t = string_of_type_int [] t
 

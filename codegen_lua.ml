@@ -194,12 +194,15 @@ and trans_iexpr s mut iexpr =
     let v x = if mut then x else "rv(" ^ x ^ ")" in
     match iexpr with
         | Name(loc, ({sym_kind=Param; sym_param_mode=Const_param} as sym)) ->
-            assert (not mut);
+            (*assert (not mut);*)
             v (lua_name_of_var sym)
         | Name(loc, ({sym_kind=Param; sym_param_mode=(Var_param|Out_param)} as sym)) ->
             lua_name_of_var sym
         | Name(loc, {sym_kind=Const; sym_const=Some e}) ->
             trans_iexpr s mut e
+        | Name(loc, {sym_kind=Const; sym_type=Some(Enum_type _); sym_name=name}) ->
+            (* Enumeration elements are translated as strings. Easier to debug! *)
+            "\"" ^ name ^ "\""
         | Name(loc, sym) ->
             trans s true sym;
             v (lua_name_of_var sym)

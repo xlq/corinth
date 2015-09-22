@@ -661,8 +661,14 @@ and trans_type ts = function
         trans_constrained_type_params {ts with ts_scope = ptypesym} constr_type_params;
         trans_params ts ptypesym params return_type;
         Proc_type(ptypesym, [])
-        
-
+    | Parse_tree.Enum_type(elements) ->
+        let elements = List.map (fun (loc, name) ->
+            check_for_duplicate_definition ts.ts_scope loc name;
+            create_sym ts.ts_scope loc name Const
+            ) elements in
+        let ty = Enum_type(elements) in
+        List.iter (fun el -> el.sym_type <- Some ty) elements;
+        ty
 
 and trans_stmts ts = List.iter (trans_stmt ts)
 
@@ -883,7 +889,7 @@ and trans_expr ts (target_type: ttype option) = function
                                         ("Cannot assign to this expression (parameter `"
                                             ^ param.sym_name ^ "' is declared `"
                                             ^ (match param.sym_param_mode with Var_param -> "var"
-                                                                             | Out_param -> "out") ^ "'.")
+                                                                             | Out_param -> "out") ^ "').")
                                 end
                             | Const_param -> ()
                         end;

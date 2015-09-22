@@ -41,6 +41,7 @@ and ttype =
     | Applied_type of loc * ttype * ttype args
     | Pointer_type of ttype
     | Proc_type of loc * constrained_type_params * param list * ttype option
+    | Enum_type of (loc * string) list
 
 and stmt =
     | Decl of decl

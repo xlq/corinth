@@ -47,6 +47,10 @@ dotted_name:
     | IDENT { [$1] }
     | IDENT DOT dotted_name { $1 :: $3 }
 
+ident_list:
+    | IDENT { [loc(), $1] }
+    | IDENT COMMA ident_list { (loc(), $1)::$3 }
+
 ttype_inner:
     | dotted_name {
         match $1 with
@@ -58,6 +62,8 @@ ttype_inner:
     | ttype_inner LT type_args GT { Applied_type(loc(), $1, $3) }
     | PROC opt_constrained_type_params LPAREN params RPAREN opt_type
         { Proc_type(loc(), $2, $4, $6) }
+    | LPAREN ident_list RPAREN
+        { Enum_type($2) }
 
 ttype:
     | ttype_inner { $1 }

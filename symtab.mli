@@ -52,6 +52,7 @@ and ttype =
     | Pointer_type of ttype
     | Record_type of symbol option
     | Proc_type of symbol * tbinds
+    | Enum_type of symbol list (* Const symbols that constitute the enumeration *)
 
 and tbinds = (symbol * ttype) list
 
