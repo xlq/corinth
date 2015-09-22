@@ -3,7 +3,7 @@ open Big_int
 type loc = Lexing.position
 type dotted_name = string list
 
-type binop = Add | Subtract | Multiply | Divide | LT | GT | LE | GE | EQ | NE
+type binop = Add | Subtract | Multiply | Divide | LT | GT | LE | GE | EQ | NE | And | Or
 
 type sym_kind =
     | Unit
@@ -81,6 +81,7 @@ and iexpr =
     | Field_access of loc * iexpr * symbol
     | Binop of loc * iexpr * binop * iexpr
     | Deref of loc * iexpr
+    | Not of loc * iexpr
     | New of loc * ttype * iexpr
     | Genericify of iexpr * ttype (* make generic (as part of coercion to type parameter *)
 

@@ -226,7 +226,9 @@ and trans_iexpr s mut iexpr =
                     | LE -> "<="
                     | GE -> ">="
                     | EQ -> "=="
-                    | NE -> "~=")
+                    | NE -> "~="
+                    | And -> "and"
+                    | Or -> "or")
                 ^ " (" ^ trans_iexpr s false rhs ^ ")"
         | Record_cons(loc, rec_sym, fields) ->
             "{" ^ String.concat ", " (List.map (fun (field, value) ->
@@ -234,6 +236,8 @@ and trans_iexpr s mut iexpr =
                 ) fields) ^ "}"
         | Field_access(loc, lhs, field) ->
             "(" ^ (trans_iexpr s mut lhs) ^ ")." ^ lua_name_of_local field
+        | Not(loc, e) ->
+            "not (" ^ trans_iexpr s false e ^ ")"
         | New(loc, ty, e) ->
             "{rv(" ^ trans_iexpr s false e ^ ")}"
         | Deref(loc, ptr) ->

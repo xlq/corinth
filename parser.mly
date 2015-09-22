@@ -21,7 +21,7 @@
 %token <string> CHARLIT
 
 /* Keywords */
-%token CLASS CONST ELSE ELSIF END IF IMPLEMENTS IMPORTED IS LOOP NEW OUT
+%token AND CLASS CONST ELSE ELSIF END IF IMPLEMENTS IMPORTED IS LOOP NEW NOT OR OUT
 %token OVERRIDING PROC RETURN THEN TYPE UNIT VAR WHILE WITH
 
 
@@ -33,6 +33,9 @@
 %start unit_decl
 %type <Parse_tree.unit_decl> unit_decl
 
+%left OR
+%left AND
+%right NOT
 %left LT GT LE GE EQ NE
 %left PLUS DASH
 %left STAR SLASH
@@ -203,7 +206,10 @@ expr:
     | expr GE expr { Binop(loc(), $1, Symtab.GE, $3) }
     | expr EQ expr { Binop(loc(), $1, Symtab.EQ, $3) }
     | expr NE expr { Binop(loc(), $1, Symtab.NE, $3) }
+    | expr AND expr { Binop(loc(), $1, Symtab.And, $3) }
+    | expr OR expr { Binop(loc(), $1, Symtab.Or, $3) }
     | expr CARET { Deref(loc(), $1) }
+    | NOT expr { Not(loc(), $2) }
     | NEW expr { New(loc(), $2) }
     | expr DOT IDENT { Field_access(rhs_start_pos 3, $1, $3) }
 

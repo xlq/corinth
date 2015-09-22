@@ -995,6 +995,12 @@ and trans_expr ts (target_type: ttype option) = function
                     (get_fields rec_sym) pos_fields named_fields)
              ), unsome target_type, false)
         ))
+    | Parse_tree.Binop(loc, lhs, (And|Or as op), rhs) ->
+        let lhs, lhs_type, _ = trans_expr ts (Some Boolean_type) lhs in
+        let rhs, rhs_type, _ = trans_expr ts (Some Boolean_type) rhs in
+        expect_type ts (loc_of_iexpr lhs) Boolean_type "for boolean operation" lhs_type;
+        expect_type ts (loc_of_iexpr rhs) Boolean_type "for boolean operation" rhs_type;
+        (Binop(loc, lhs, op, rhs), Boolean_type, false)
     | Parse_tree.Binop(loc, lhs, op, rhs) ->
         let lhs, lhs_type, _ = trans_expr ts None lhs in
         let rhs, rhs_type, _ = trans_expr ts None rhs in
@@ -1014,6 +1020,10 @@ and trans_expr ts (target_type: ttype option) = function
                         ^ string_of_type ptr_type ^ "'.");
                 raise Compile_error
         end
+    | Parse_tree.Not(loc, e) ->
+        let e, ty, _ = trans_expr ts None e in
+        expect_type ts (loc_of_iexpr e) Boolean_type "for boolean operation" ty;
+        (Not(loc, e), Boolean_type, false)
     | Parse_tree.New(loc, e) ->
         let e, ty, lv = trans_expr ts
             (match target_type with

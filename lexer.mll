@@ -8,6 +8,7 @@
         tbl
 
     let keywords = create_hashtable [
+        "and",           AND;
         "class",         CLASS;
         "const",         CONST;
         "else",          ELSE;
@@ -19,6 +20,8 @@
         "is",            IS;
         "loop",          LOOP;
         "new",           NEW;
+        "not",           NOT;
+        "or",            OR;
         "out",           OUT;
         "overriding",    OVERRIDING;
         "proc",          PROC;

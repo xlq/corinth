@@ -60,5 +60,6 @@ and expr =
     | Record_cons of loc * expr args
     | Binop of loc * expr * Symtab.binop * expr
     | Deref of loc * expr
+    | Not of loc * expr
     | New of loc * expr
     | Field_access of loc * expr * string
