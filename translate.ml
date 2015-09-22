@@ -418,6 +418,7 @@ let rec loc_of_expr = function
 
 let rec loc_of_iexpr = function
     | Name(loc, _)
+    | Bool_literal(loc, _)
     | Int_literal(loc, _)
     | String_literal(loc, _)
     | Char_literal(loc, _)
@@ -752,6 +753,10 @@ and trans_stmt ts = function
    Third value is true iff expression is an l-value. *)
 
 and trans_expr ts (target_type: ttype option) = function
+    | Parse_tree.Name(loc, ["false"]) ->
+        (Bool_literal(loc, false), Boolean_type, false)
+    | Parse_tree.Name(loc, ["true"]) ->
+        (Bool_literal(loc, true), Boolean_type, false)
     | Parse_tree.Name(loc, name) ->
         let name_start :: name_tail = name in
         let loc_of_result = function

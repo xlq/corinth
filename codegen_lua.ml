@@ -206,6 +206,8 @@ and trans_iexpr s mut iexpr =
         | Name(loc, sym) ->
             trans s true sym;
             v (lua_name_of_var sym)
+        | Bool_literal(loc, false) -> "false"
+        | Bool_literal(loc, true) -> "true"
         | Int_literal(loc, n) ->
             string_of_big_int n
         | String_literal(loc, s) ->

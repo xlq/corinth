@@ -71,6 +71,7 @@ and istmt =
 
 and iexpr =
     | Name of loc * symbol
+    | Bool_literal of loc * bool
     | Int_literal of loc * big_int
     | String_literal of loc * string
     | Char_literal of loc * string
