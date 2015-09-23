@@ -58,7 +58,7 @@ and ttype =
     | TUniv of tvar * ttype
 
 and tvar = {
-    tvar_origin: symbol; (* originally came from this symbol *)
+    tvar_origin: symbol option; (* originally came from this symbol *)
     tvar_id: int; (* unique id for dumping *)
     mutable tvar_link: ttype option;
 }
@@ -82,8 +82,8 @@ and proc_type = {
 
 and proc_param = {
     param_loc: loc;
-    param_mode: param_mode;
-    param_name: string;
+    mutable param_mode: param_mode;
+    param_name: string option;
     param_type: ttype;
 }
 
@@ -191,10 +191,12 @@ let get_params sym = List.filter (is_kind Param) sym.sym_locals
 let string_of_tvar v = "t" ^ string_of_int v.tvar_id
 
 let rec string_of_type = function
+    | TNone -> "(no type)"
     | TBoolean -> "bool"
     | TInteger -> "int"
     | TChar -> "char"
     | TName s -> s.sym_name
+    | TVar {tvar_link=Some t} -> string_of_type t
     | TVar v -> string_of_tvar v
     | TPointer ty -> "^" ^ string_of_type ty
     | TRecord record ->
@@ -206,7 +208,7 @@ let rec string_of_type = function
                 | Const_param -> ""
                 | Var_param -> "var "
                 | Out_param -> "out "
-                ) ^ param.param_name ^ ": "
+                ) ^ (match param.param_name with Some s -> s ^ ": " | None -> "")
                   ^ string_of_type param.param_type
             ) proc.proc_params) ^ ")"
             ^ (match proc.proc_return with
@@ -215,10 +217,11 @@ let rec string_of_type = function
     | TEnum elements ->
         "(" ^ String.concat ", " (List.map (fun s -> s.sym_name) elements) ^ ")"
     | TUniv(v, ty) ->
-        "{" ^ string_of_tvar v ^ " from "
+        "{" ^ string_of_tvar v
             ^ (match v.tvar_origin with
-                | {sym_kind=Type_sym} -> v.tvar_origin.sym_name
-                | {sym_kind=Var} -> v.tvar_origin.sym_name ^ "'Type") ^ "}"
+                | Some {sym_kind=Type_param; sym_name=s} -> " from " ^ s
+                | Some {sym_kind=Var; sym_name=s} -> " from " ^ s ^ "'Type"
+                | None -> "") ^ "} " ^ string_of_type ty
 
 let rec sym_is_grandchild parent sym =
     if parent == sym then true

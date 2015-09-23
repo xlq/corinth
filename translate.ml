@@ -28,7 +28,9 @@ type translation_state = {
     ts_tctx: Types.context;
 }
 
-let coerce ts = Types.coerce ts.ts_tctx (* short-hand *)
+let coerce ts t1 t2 =
+    prerr_endline ("coerce " ^ string_of_type t1 ^ " to " ^ string_of_type t2);
+    Types.coerce ts.ts_tctx t1 t2 (* short-hand *)
 
 let actual_type = function
     | TName {sym_kind=Type_sym; sym_type=Some t} -> t
@@ -215,7 +217,7 @@ let construct_type_of_proc proc_sym =
         proc_loc = unsome proc_sym.sym_defined;
         proc_params = List.map (fun param ->
             { param_loc = unsome param.sym_defined;
-              param_name = param.sym_name;
+              param_name = Some param.sym_name;
               param_mode = param.sym_param_mode;
               param_type = unsome param.sym_type }
             ) (get_params proc_sym);
@@ -390,7 +392,7 @@ and trans_type_params ts =
     List.map (fun (loc, name) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let tp = create_sym ts.ts_scope loc name Type_param in
-        let v = new_tvar tp in
+        let v = new_tvar (Some tp) in
         tp.sym_type <- Some (TVar v);
         tp
     )
@@ -462,13 +464,11 @@ and trans_stmt ts = function
     | Parse_tree.Decl decl -> trans_decl ts decl
     | Parse_tree.Expr((Parse_tree.Apply _) as e) ->
         let call, tcall, _ = trans_expr ts None e in
-        begin match call, tcall with
-            | Apply(loc, proc, args), TNone ->
+        expect_type ts (loc_of_iexpr call) TNone "in call statement" tcall;
+        begin match call with
+            | Apply(loc, proc, args) ->
                 emit ts (Call(loc, proc, args))
-            | Apply(loc, Name(_,({sym_kind=Proc} as proc_sym)), _), _ ->
-                Errors.semantic_error loc
-                    ("Proc `" ^ name_for_error ts proc_sym
-                        ^ "' returns a value, so cannot be called as a statement.")
+            | _ -> assert false
         end
     | Parse_tree.Expr(e) ->
         Errors.semantic_error
@@ -661,101 +661,29 @@ and trans_expr ts (target_type: ttype option) = function
     | Parse_tree.Char_literal(loc, s) ->
         (Char_literal(loc, s), TChar, false)
     | Parse_tree.Apply(loc, proc, (pos_args, named_args)) ->
+        (* Translate callee. *)
         let proc, proc_type, _ = trans_expr ts None proc in
-        begin match proc_type with
-            | TProc proct ->
-                let arguments = List.map (fun (param, arg) ->
-                    let arg, arg_type, lvalue = trans_expr ts (Some param.param_type) arg in
-                    begin match param.param_mode with
-                        | Var_param | Out_param ->
-                            if not lvalue then begin
-                                Errors.semantic_error (loc_of_iexpr arg)
-                                    ("Cannot assign to this expression (parameter `"
-                                        ^ param.param_name ^ "' is declared `"
-                                        ^ (match param.param_mode with Var_param -> "var"
-                                                                         | Out_param -> "out") ^ "').")
-                            end
-                        | Const_param -> ()
-                    end;
-                    expect_type ts (loc_of_iexpr arg) param.param_type
-                        ("for parameter `" ^ param.param_name ^ "'") arg_type;
-                    (param, arg)
-                ) (match_args_to_params loc "arguments" (fun p -> p.param_name)
-                    proct.proc_params pos_args named_args)
-                in
-                let return_type = proct.proc_return in
-                let expr = Apply(loc, proc, arguments) in
-                todo ts Todo_apply_check (fun () ->
-                    (*classes := List.map (fun (cls, cls_args) ->
-                        (* Can we find a class to pass on to the callee? *)
-                        match maybe_find (fun (i, (cls', cls_args')) ->
-                            try ignore (unif_ctx ts (fun ts ->
-                                activate ts (List.map (fun (tp, ty) -> (tp, subst_tparams tbinds ty)) cls_args);
-                                activate ts cls_args';
-                                List.iter2 (fun tp tp' ->
-                                    type_check ts true (Named_type(tp, [])) (Named_type(tp, []))
-                                ) (get_type_params cls) (get_type_params cls')
-                            )); true with Type_mismatch -> false
-                        ) ( (* Look in current scope's constraints for classes to look at. *)
-                            enumerate ts.ts_scope.sym_tconstraints )
-                        with
-                            | Some (i, _) -> Forward i
-                            | None ->
-                                (* Cannot forward - must implement the class ourself. *)
-                                fst (unif_ctx ts (fun ts ->
-                                    (* Substitute class arguments. *)
-                                    activate ts (List.map (fun (tp, ty) -> (tp, subst_tparams tbinds ty)) cls_args);
-                                    (* Check all class procs. *)
-                                    Implement(cls, List.map (fun cls_proc ->
-                                        (* Find implementation candidates.
-                                           TODO: Proper scope rules! *)
-                                        let cls_params = get_params cls_proc in
-                                        let candidates = List.fold_left (fun candidates impl ->
-                                            prerr_endline ("Testing " ^ impl.sym_name);
-                                            let impl_params = get_params impl in
-                                            try
-                                                ignore (exi_quant_param ts impl (fun ts ->
-                                                    List.iter2 (fun cls_param impl_param ->
-                                                        prerr_endline ("Checking " ^ string_of_type (unsome cls_param.sym_type)
-                                                            ^ " against " ^ string_of_type (unsome impl_param.sym_type));
-                                                        type_check ts false
-                                                            (unsome cls_param.sym_type)
-                                                            (unsome impl_param.sym_type)
-                                                    ) cls_params impl_params;
-                                                    prerr_endline ("Checking return " ^ string_of_type (unsome cls_proc.sym_type)
-                                                        ^ " against " ^ string_of_type (unsome impl.sym_type));
-                                                    type_check ts false
-                                                        (unsome cls_proc.sym_type)
-                                                        (unsome impl.sym_type)
-                                                ));
-                                                (impl (*, instantiation*))::candidates
-                                            with Type_mismatch -> candidates
-                                        ) [] cls_proc.sym_implementations in
-                                        (* TODO: Eliminate more general candidates. *)
-                                        match candidates with
-                                            | [] ->
-                                                Errors.semantic_error loc
-                                                    ("No implementation of `"
-                                                        ^ name_for_error ts cls_proc ^ "' found.");
-                                                raise Errors.Compile_error
-                                            | _::_::_ ->
-                                                Errors.semantic_error loc
-                                                    ("Multiple implementations of `"
-                                                        ^ name_for_error ts cls_proc ^ "' match the types.");
-                                                List.iter (fun candidate ->
-                                                    Errors.semantic_error (unsome candidate.sym_defined)
-                                                        ("`" ^ name_for_error ts candidate ^ "' matches.")
-                                                ) candidates;
-                                                raise Errors.Compile_error
-                                            | [impl (*, instantiation*)] ->
-                                                (cls_proc, impl)
-                                    ) (List.filter (is_kind Class_proc) cls.sym_locals))
-                                ))
-                    ) proc_sym.sym_tconstraints
-                    *) (* TODO TODO TODO somewhere *) ()
-                );
-                (expr, return_type, false)
-        end
+        (* Translate arguments. *)
+        let pos_args' = List.map (fun e -> let e, ty, lv = trans_expr ts None e in None, e, ty, lv) pos_args in
+        let named_args' = List.map (fun (name, e) -> let e, ty, lv = trans_expr ts None e in Some name, e, ty, lv) named_args in
+        (* Construct proc type from arguments given. *)
+        let args_proc_type = {
+            proc_loc = loc;
+            proc_params =
+                List.map (fun (name, e, ty, lv) ->
+                    { param_loc = loc_of_iexpr e;
+                      param_mode = if lv then Var_param else Const_param;
+                      param_name = name;
+                      param_type = ty }) (pos_args' @ named_args');
+            proc_return = match target_type with
+                | Some ty -> ty
+                | None -> TVar (new_tvar None) } in
+        coerce ts proc_type (TProc args_proc_type);
+        (Apply(loc, proc,
+            List.map2 (fun param (_, e, _, _) -> (param, e))
+                      args_proc_type.proc_params
+                      (pos_args' @ named_args')),
+         args_proc_type.proc_return, false)
     | Parse_tree.Record_cons(loc, (pos_fields, named_fields)) ->
         (* Get record type from context. *)
         let rec_info = match target_type with

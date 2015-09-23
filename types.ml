@@ -39,8 +39,24 @@ let rec subst v t' t =
                       ) proc.proc_params;
                     proc_return = subst v t' proc.proc_return }
 
-let rec coerce ctx t1 t2 =
+let rec coerce_params ctx param1 param2 =
+    begin match param1.param_mode, param2.param_mode with
+        | Const_param, Const_param -> ()
+        | Const_param, Var_param -> ()
+        | Const_param, Out_param -> raise Type_mismatch
+        | Var_param, Const_param -> raise Type_mismatch
+        | Var_param, Var_param -> ()
+        | Var_param, Out_param -> raise Type_mismatch
+        | Out_param, Const_param -> raise Type_mismatch
+        | Out_param, Var_param -> raise Type_mismatch
+        | Out_param, Out_param -> ()
+    end;
+    param2.param_mode <- param1.param_mode; (* XXX: Dodgy! *)
+    coerce ctx param1.param_type param2.param_type
+
+and coerce ctx t1 t2 =
     match t1, t2 with
+        | TNone, TNone -> ()
         | TBoolean, TBoolean -> ()
         | TInteger, TInteger -> ()
         | TChar, TChar -> ()
@@ -59,13 +75,34 @@ let rec coerce ctx t1 t2 =
                 coerce ctx field1.field_type field2.field_type
             ) rec1.rec_fields rec2.rec_fields
         | TProc proc1, TProc proc2 ->
-            if List.length proc1.proc_params <> List.length proc2.proc_params then raise Type_mismatch;
-            List.iter2 (fun param1 param2 ->
-                if param1.param_name <> param2.param_name then raise Type_mismatch;
-                if param1.param_mode <> param2.param_mode then raise Type_mismatch;
-                coerce ctx param1.param_type param2.param_type
-            ) proc1.proc_params proc2.proc_params;
+            let params1 = ref proc1.proc_params in
+            let doing_positional = ref true in
+            List.iter (fun param2 ->
+                match param2.param_name with
+                    | None ->
+                        assert !doing_positional;
+                        begin match !params1 with
+                            | [] -> raise Type_mismatch
+                            | param1::tail ->
+                                params1 := tail;
+                                coerce_params ctx param1 param2
+                        end
+                    | Some name2 ->
+                        doing_positional := false;
+                        let rec find head = function
+                            | [] -> raise Type_mismatch
+                            | param1::tail when param1.param_name = Some name2 ->
+                                params1 := List.rev head @ tail;
+                                param1
+                            | param1::tail ->
+                                find (param1::head) tail
+                        in
+                        let param1 = find [] !params1 in
+                        coerce_params ctx param1 param2
+            ) proc2.proc_params;
+            if !params1 <> [] then raise Type_mismatch;
             coerce ctx proc2.proc_return proc1.proc_return
         | TUniv(v, t1), t2 ->
             let v' = new_tvar v.tvar_origin in
             coerce ctx (subst v (TVar v') t1) t2
+        | _ -> raise Type_mismatch

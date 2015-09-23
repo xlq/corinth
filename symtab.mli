@@ -60,7 +60,7 @@ and ttype =
     | TUniv of tvar * ttype
 
 and tvar = {
-    tvar_origin: symbol; (* originally came from this symbol *)
+    tvar_origin: symbol option; (* originally came from this symbol *)
     tvar_id: int; (* unique id for dumping *)
     mutable tvar_link: ttype option; (* type substitution *)
 }
@@ -84,8 +84,8 @@ and proc_type = {
 
 and proc_param = {
     param_loc: loc;
-    param_mode: param_mode;
-    param_name: string;
+    mutable param_mode: param_mode;
+    param_name: string option;
     param_type: ttype;
 }
 
@@ -118,7 +118,7 @@ and iexpr =
     | New of loc * ttype * iexpr
     | Bind of ttype * iexpr (* bind type parameter *)
 
-val new_tvar : symbol -> tvar
+val new_tvar : symbol option -> tvar
 val is_kind : sym_kind -> symbol -> bool
 val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)
