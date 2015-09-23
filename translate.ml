@@ -3,6 +3,7 @@
    and performs type checking. *)
 
 open Symtab
+open Types
 open Errors
 open Misc
 
@@ -28,9 +29,9 @@ type translation_state = {
     ts_tctx: Types.context;
 }
 
-let coerce ts t1 t2 =
+let coerce ts situation t1 t2 =
     prerr_endline ("coerce " ^ string_of_type t1 ^ " to " ^ string_of_type t2);
-    Types.coerce ts.ts_tctx t1 t2 (* short-hand *)
+    Types.coerce ts.ts_tctx situation t1 t2 (* short-hand *)
 
 let actual_type = function
     | TName {sym_kind=Type_sym; sym_type=Some t} -> t
@@ -51,11 +52,6 @@ let emit ts x =
     match ts.ts_block with
         | None -> assert false
         | Some code -> code := (!code) @ [x] (* XXX: horribly inefficient *)
-
-let param_mode_name = function
-    | Const_param -> "an input parameter"
-    | Var_param -> "a `var' parameter"
-    | Out_param -> "a `out' parameter"
 
 (* Return the name of the given symbol suitable for an error message. *)
 let name_for_error ts sym =
@@ -140,13 +136,14 @@ let find_dotted_name ts loc name =
                         raise Compile_error
     in follow start tbinds tail
 
-let expect_type ts loc target_type why_target source_type =
-    try coerce ts source_type target_type
-    with Types.Type_mismatch ->
-        Errors.semantic_error loc
+let expect_type ts loc target_type situation source_type =
+    try coerce ts situation source_type target_type
+    with Type_mismatch err ->
+        (*Errors.semantic_error loc
             ("Type mismatch " ^ why_target ^ ": expected `"
                 ^ string_of_type target_type
-                ^ "' but got `" ^ string_of_type source_type ^ "'.")
+                ^ "' but got `" ^ string_of_type source_type ^ "'.")*)
+        Errors.type_error loc err
 
 (* p_name is a function to get the name of a parameter *)
 let match_args_to_params loc what p_name params pos_args named_args =
@@ -364,7 +361,7 @@ and trans_decl ts = function
                         (* Initial value must be of correct type. *)
                         let init, init_type, _ = trans_expr ts (Some specified_type) init in
                         expect_type ts loc specified_type
-                            ("for initialisation of variable `" ^ name ^ "'")
+                            [SVar_init var_sym]
                             init_type;
                         emit ts (Assign(loc, Name(loc, var_sym), init))
                     | None -> ()
@@ -464,7 +461,7 @@ and trans_stmt ts = function
     | Parse_tree.Decl decl -> trans_decl ts decl
     | Parse_tree.Expr((Parse_tree.Apply _) as e) ->
         let call, tcall, _ = trans_expr ts None e in
-        expect_type ts (loc_of_iexpr call) TNone "in call statement" tcall;
+        expect_type ts (loc_of_iexpr call) TNone [SCall_none] tcall;
         begin match call with
             | Apply(loc, proc, args) ->
                 emit ts (Call(loc, proc, args))
@@ -481,7 +478,7 @@ and trans_stmt ts = function
             raise Compile_error
         end;
         let src, src_type, _ = trans_expr ts (Some dest_type) src in
-        expect_type ts loc dest_type "for assignment" src_type;
+        expect_type ts loc dest_type [SAssign] src_type;
         emit ts (Assign(loc, dest, src))
     | Parse_tree.Return(loc, Some e) ->
         begin match ts.ts_scope with
@@ -491,7 +488,7 @@ and trans_stmt ts = function
                      ^ "' has no return type, so cannot return a value.")
             | {sym_kind=Proc; sym_type=Some t} ->
                 let e, e_type, _ = trans_expr ts (Some t) e in
-                expect_type ts (loc_of_iexpr e) t ("for returned value") e_type;
+                expect_type ts (loc_of_iexpr e) t [SReturn_stat]  e_type;
                 emit ts (Return(loc, Some e))
             | _ -> assert false
         end
@@ -510,7 +507,7 @@ and trans_stmt ts = function
             List.map (fun (loc, condition, body) ->
                 let condition, condition_type, _ = trans_expr ts
                     (Some TBoolean) condition in
-                expect_type ts loc TBoolean "for condition" condition_type;
+                expect_type ts loc TBoolean [SCondition] condition_type;
                 let body' = ref [] in
                 trans_stmts {ts with ts_block = Some body'} body;
                 (loc, condition, !body')
@@ -524,7 +521,7 @@ and trans_stmt ts = function
         ))
     | Parse_tree.While_stmt(loc, cond, body) ->
         let cond, cond_type, _ = trans_expr ts (Some TBoolean) cond in
-        expect_type ts loc TBoolean "for condition" cond_type;
+        expect_type ts loc TBoolean [SCondition] cond_type;
         let body' = ref [] in
         trans_stmts {ts with ts_block = Some body'} body;
         emit ts (While_stmt(loc, cond, !body'))
@@ -678,7 +675,9 @@ and trans_expr ts (target_type: ttype option) = function
             proc_return = match target_type with
                 | Some ty -> ty
                 | None -> TVar (new_tvar None) } in
-        coerce ts proc_type (TProc args_proc_type);
+        (*coerce ts proc_type (TProc args_proc_type);*)
+        expect_type ts loc (TProc args_proc_type)
+            [SApply(match proc with | Name(_,s) -> Some s | _ -> None)] proc_type;
         (Apply(loc, proc,
             List.map2 (fun param (_, e, _, _) -> (param, e))
                       args_proc_type.proc_params
@@ -702,8 +701,7 @@ and trans_expr ts (target_type: ttype option) = function
         (Record_cons(loc, rec_type,
             List.map (fun (field, expr) ->
                 let expr, expr_type, _ = trans_expr ts (Some field.field_type) expr in
-                expect_type ts loc field.field_type
-                    ("for field `" ^ field.field_name ^ "'") expr_type;
+                expect_type ts loc field.field_type [SRecord_cons]  expr_type;
                 (field.field_name, expr)
             ) (match_args_to_params loc "record fields" (fun f -> f.field_name)
                 rec_info.rec_fields pos_fields named_fields)
@@ -711,14 +709,14 @@ and trans_expr ts (target_type: ttype option) = function
     | Parse_tree.Binop(loc, lhs, (And|Or as op), rhs) ->
         let lhs, lhs_type, _ = trans_expr ts (Some TBoolean) lhs in
         let rhs, rhs_type, _ = trans_expr ts (Some TBoolean) rhs in
-        expect_type ts (loc_of_iexpr lhs) TBoolean "for boolean operation" lhs_type;
-        expect_type ts (loc_of_iexpr rhs) TBoolean "for boolean operation" rhs_type;
+        expect_type ts (loc_of_iexpr lhs) TBoolean [SBoolean_op] lhs_type;
+        expect_type ts (loc_of_iexpr rhs) TBoolean [SBoolean_op] rhs_type;
         (Binop(loc, lhs, op, rhs), TBoolean, false)
     | Parse_tree.Binop(loc, lhs, op, rhs) ->
         let lhs, lhs_type, _ = trans_expr ts None lhs in
         let rhs, rhs_type, _ = trans_expr ts None rhs in
         (* match_types ts loc lhs_type rhs_type; *)
-        expect_type ts loc rhs_type "for binary operator" lhs_type; (* TODO: properly *)
+        expect_type ts loc rhs_type [SBinop] lhs_type; (* TODO: properly *)
         (Binop(loc, lhs, op, rhs),
             (match op with
                 | Add|Subtract|Multiply|Divide -> lhs_type
@@ -736,7 +734,7 @@ and trans_expr ts (target_type: ttype option) = function
         end
     | Parse_tree.Not(loc, e) ->
         let e, ty, _ = trans_expr ts None e in
-        expect_type ts (loc_of_iexpr e) TBoolean "for boolean operation" ty;
+        expect_type ts (loc_of_iexpr e) TBoolean [SBoolean_op] ty;
         (Not(loc, e), TBoolean, false)
     | Parse_tree.New(loc, e) ->
         let e, ty, lv = trans_expr ts

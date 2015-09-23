@@ -218,10 +218,10 @@ let rec string_of_type = function
         "(" ^ String.concat ", " (List.map (fun s -> s.sym_name) elements) ^ ")"
     | TUniv(v, ty) ->
         "{" ^ string_of_tvar v
-            ^ (match v.tvar_origin with
+            (* ^ (match v.tvar_origin with
                 | Some {sym_kind=Type_param; sym_name=s} -> " from " ^ s
                 | Some {sym_kind=Var; sym_name=s} -> " from " ^ s ^ "'Type"
-                | None -> "") ^ "} " ^ string_of_type ty
+                | None -> "") *) ^ "} " ^ string_of_type ty
 
 let rec sym_is_grandchild parent sym =
     if parent == sym then true
@@ -234,3 +234,8 @@ let full_name sym =
             if s.sym_parent == s then r
             else follow (s.sym_name::r) s.sym_parent
          in follow [] sym)
+
+let param_mode_name = function
+    | Const_param -> "an input parameter"
+    | Var_param -> "a `var' parameter"
+    | Out_param -> "a `out' parameter"
