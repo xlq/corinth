@@ -14,6 +14,10 @@ let unsome = function
     | Some x -> x
     | None -> raise (Failure "unsome")
 
+let map_option f = function
+    | None -> None
+    | Some x -> Some (f x)
+
 let rec times n s =
     match n with
         | 0 -> ""

@@ -9,6 +9,7 @@ endif
 syn keyword synKeyword class else elsif end if implements imported is loop 
 syn keyword synKeyword overriding proc return then type unit while with
 syn keyword synMinorKeyword and const new not or out var 
+syn keyword synConstant true false
 syn match synIdent '[A-Za-z_][A-Za-z0-9_]*'
 syn match synBracket '[()<>{}|]'
 syn match synOperator '[-+*/=]'
@@ -25,5 +26,6 @@ hi def link synBracket SpecialChar
 hi def link synOperator Operator
 hi def link synMinorKeyword Function
 hi def link synString String
+hi def link synConstant Constant
 
 let b:current_syntax = 'corinth'

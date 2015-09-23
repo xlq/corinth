@@ -28,12 +28,12 @@ type symbol = {
        Type_param -> sym_type is what the type parameter is currently unified with. *)
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
-    mutable sym_tconstraints: (symbol (* Class *) * tbinds) list; (* type parameter constraints *)
-    mutable sym_implementations: symbol list; (* List of Proc for Class_proc symbol (XXX: SCOPING RULES!) *)
+    mutable sym_virtual: bool;
+    mutable sym_abstract: bool;
+    mutable sym_implementations: symbol list; (* List of Proc for virtual Proc symbol (XXX: SCOPING RULES!) *)
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: string option;
-    mutable sym_abstract: bool;
     mutable sym_const: iexpr option; (* definition of constants *)
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?
@@ -41,18 +41,53 @@ type symbol = {
     mutable sym_backend_translated: int;
 }
 
+(* Note: parameters are stored in two places:
+   1. As children of Proc symbols. This represents the parameters within the proc.
+   2. As part of the TProc type. This represents the type of the proc. *)
 and param_mode = Const_param | Var_param | Out_param
 
 and ttype =
-    | No_type
-    | Boolean_type
-    | Integer_type  (* This is temporary, for development *)
-    | Char_type
-    | Named_type of symbol * tbinds
-    | Pointer_type of ttype
-    | Record_type of symbol option
-    | Proc_type of symbol * tbinds
-    | Enum_type of symbol list (* Const symbols that constitute the enumeration *)
+    | TNone
+    | TBoolean
+    | TInteger
+    | TChar
+    | TName of symbol
+    | TVar of tvar
+    | TPointer of ttype
+    | TRecord of record_type
+    | TProc of proc_type
+    | TEnum of symbol list (* Const symbols that constitute the enumeration *)
+    | TUniv of tvar * ttype
+
+and tvar = {
+    tvar_origin: symbol; (* originally came from this symbol *)
+    tvar_id: int; (* unique id for dumping *)
+    mutable tvar_link: ttype option; (* type substitution *)
+}
+
+and record_type = {
+    rec_loc: loc;
+    rec_fields: record_field list;
+}
+
+and record_field = {
+    field_loc: loc;
+    field_name: string;
+    field_type: ttype;
+}
+
+and proc_type = {
+    proc_loc: loc;
+    proc_params: proc_param list;
+    proc_return: ttype;
+}
+
+and proc_param = {
+    param_loc: loc;
+    param_mode: param_mode;
+    param_name: string;
+    param_type: ttype;
+}
 
 and tbinds = (symbol * ttype) list
 
@@ -61,8 +96,7 @@ and classarg = (* what to pass to proc to satisfy classes *)
     | Forward of int (* index into caller's tconstraints (XXX: ugly) *)
 
 and istmt =
-    | Call of loc * iexpr * (symbol * iexpr) list * tbinds
-            * classarg list ref
+    | Call of loc * iexpr * (proc_param * iexpr) list
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
     | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
@@ -75,26 +109,23 @@ and iexpr =
     | String_literal of loc * string
     | Char_literal of loc * string
     | Dispatch of int (* index in sym_tconstraints *) * symbol * tbinds (* - XXX: needed? *)
-    | Apply of loc * iexpr * (symbol * iexpr) list (* parameter bindings *)
-                           * tbinds (* type parameter bindings (XXX: needed?) *)
-                           * classarg list ref (* classes *)
-    | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
-    | Field_access of loc * iexpr * symbol
+    | Apply of loc * iexpr * (proc_param * iexpr) list (* parameter bindings *)
+    | Record_cons of loc * ttype (* record type *) * (string * iexpr) list
+    | Field_access of loc * iexpr * string
     | Binop of loc * iexpr * binop * iexpr
     | Deref of loc * iexpr
     | Not of loc * iexpr
     | New of loc * ttype * iexpr
-    | Genericify of iexpr * ttype (* make generic (as part of coercion to type parameter *)
+    | Bind of ttype * iexpr (* bind type parameter *)
 
+val new_tvar : symbol -> tvar
 val is_kind : sym_kind -> symbol -> bool
 val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)
 val create_sym : symbol -> loc -> string -> sym_kind -> symbol
 val get_type_params : symbol -> symbol list
-val get_fields : symbol -> symbol list (* get record fields, including from base type *)
-val get_params : symbol -> symbol list (* get proc parameters *)
+val get_params : symbol -> symbol list
+val string_of_tvar : tvar -> string
 val string_of_type : ttype -> string
-val string_of_type_2 : tbinds -> ttype -> string
 val sym_is_grandchild : symbol -> symbol -> bool
 val full_name : symbol -> string
-val iter_type_params_in : (symbol -> unit) -> ttype -> unit (* call function for each type parameter in type *)

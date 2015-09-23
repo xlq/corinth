@@ -10,28 +10,27 @@ type unit_decl =
     | Unit of loc * dotted_name * decl list
 
 and type_param = loc * string
-and constrained_type_params = type_param list * tconstraint list
 and tconstraint = loc * dotted_name * ttype args
 
 and decl =
     | Type_decl of loc * string * type_param list * type_defn
     | Var_decl of loc * string * ttype option * expr option
-    | Proc_decl of loc * string * constrained_type_params * param list
+    | Proc_decl of loc * bool (* virtual? *) * string * type_param list * param list
         * ttype option (* return type *)
         * dotted_name option (* implements *)
-        * stmt list
-    | Proc_import of loc * string * constrained_type_params * param list * ttype option * dotted_name option * string
+        * proc_impl
+    | Proc_import of loc * string * type_param list * param list * ttype option * dotted_name option * string
     | Const_decl of loc * string * expr
-    | Class_decl of loc * string * type_param list * class_item list
+
+and proc_impl =
+    | Body of stmt list
+    | Abstract
 
 and type_defn =
     | Type_alias of ttype
     | Record_type of (loc * string option * ttype) list
 
 and param = loc * string * ttype option * Symtab.param_mode
-
-and class_item =
-    | Class_proc of loc * string * constrained_type_params * param list * ttype option
 
 and ttype =
     | Boolean_type
@@ -40,7 +39,7 @@ and ttype =
     | Named_type of loc * dotted_name
     | Applied_type of loc * ttype * ttype args
     | Pointer_type of ttype
-    | Proc_type of loc * constrained_type_params * param list * ttype option
+    | Proc_type of loc * type_param list * param list * ttype option
     | Enum_type of (loc * string) list
 
 and stmt =

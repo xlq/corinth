@@ -4,6 +4,7 @@ val last : 'a list -> 'a (* last element *)
 val comma_concat : string -> string list -> string
 
 val unsome : 'a option -> 'a
+val map_option : ('a -> 'b) -> 'a option -> 'b option
 
 val times : int -> string -> string
 

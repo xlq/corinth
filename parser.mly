@@ -21,8 +21,8 @@
 %token <string> CHARLIT
 
 /* Keywords */
-%token AND CLASS CONST ELSE ELSIF END IF IMPLEMENTS IMPORTED IS LOOP NEW NOT OR OUT
-%token OVERRIDING PROC RETURN THEN TYPE UNIT VAR WHILE WITH
+%token ABSTRACT AND CONST ELSE ELSIF END IF IMPLEMENTS IMPORTED IS LOOP NEW NOT OR OUT
+%token OVERRIDING PROC RETURN THEN TYPE UNIT VAR VIRTUAL WHILE WITH
 
 
 %token LPAREN RPAREN LBRACE RBRACE QUESTION COLON SEMICOLON DOT COMMA STAR
@@ -63,7 +63,7 @@ ttype_inner:
             | _ -> Named_type(loc(), $1)
         }
     | ttype_inner LT type_args GT { Applied_type(loc(), $1, $3) }
-    | PROC opt_constrained_type_params LPAREN params RPAREN opt_type
+    | PROC opt_type_params LPAREN params RPAREN opt_type
         { Proc_type(loc(), $2, $4, $6) }
     | LPAREN ident_list RPAREN
         { Enum_type($2) }
@@ -103,46 +103,33 @@ decl:
         { Type_decl(loc(), $2, $3, $5) }
     | VAR IDENT opt_type opt_init SEMICOLON
         { Var_decl(loc(), $2, $3, $4) }
-    | PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type opt_implements IS proc_body END IDENT SEMICOLON
-        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 12, $12);
-          Proc_decl(loc(), $2, $3, $5, $7, $8, $10) }
-    | PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type opt_implements IS IMPORTED STRING SEMICOLON
-        { Proc_import(loc(), $2, $3, $5, $7, $8, $11) }
+    | opt_virtual PROC IDENT opt_type_params LPAREN params RPAREN opt_type opt_implements IS proc_body END IDENT SEMICOLON
+        { check_end (rhs_start_pos 3, $3) (rhs_start_pos 13, $13);
+          Proc_decl(loc(), $1, $3, $4, $6, $8, $9, Body $11) }
+    | opt_virtual PROC IDENT opt_type_params LPAREN params RPAREN opt_type opt_implements IS ABSTRACT SEMICOLON
+        { if not $1 then syntax_error (loc()) "Only virtual procedures can be abstract.";
+          Proc_decl(loc(), true, $3, $4, $6, $8, $9, Abstract) }
+    | opt_virtual PROC IDENT opt_type_params LPAREN params RPAREN opt_type opt_implements IS IMPORTED STRING SEMICOLON
+        { if $1 then syntax_error (loc()) "Imported procedure cannot be virtual.";
+          Proc_import(loc(), $3, $4, $6, $8, $9, $12) }
     | CONST IDENT ASSIGN expr SEMICOLON
         { Const_decl(loc(), $2, $4) }
-    | CLASS IDENT LT type_params GT IS class_contents END IDENT SEMICOLON
-        { check_end (rhs_start_pos 2, $2) (rhs_start_pos 9, $9);
-          Class_decl(loc(), $2, $4, $7) }
 
+opt_virtual:
+    | /* empty */ { false }
+    | VIRTUAL { true }
 opt_type_params:
     | /* empty */ { [] }
     | LT type_params GT { $2 }
-opt_constrained_type_params:
-    | /* empty */ { ([], []) }
-    | LT type_params opt_constraints GT { ($2, $3) }
 type_params:
     | /* empty */ { [] }
     | type_param { [$1] }
     | type_param COMMA type_params { $1::$3 }
 type_param:
     | IDENT { (loc(), $1) }
-opt_constraints:
-    | /* empty */ { [] }
-    | MID constraint_list { $2 }
-constraint_list:
-    | tconstraint { [$1] }
-    | tconstraint COMMA constraint_list { $1::$3 }
-tconstraint:
-    | dotted_name LT type_args GT { (loc(), $1, $3) }
 opt_implements:
     | /* empty */ { None }
     | IMPLEMENTS dotted_name { Some $2 }
-class_contents:
-    | /* empty */ { [] }
-    | class_item class_contents { $1::$2 }
-class_item:
-    | PROC IDENT opt_constrained_type_params LPAREN params RPAREN opt_type SEMICOLON
-    { Class_proc(loc(), $2, $3, $5, $7) }
 
 opt_init:
     | /* empty */ { None }

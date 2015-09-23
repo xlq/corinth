@@ -8,8 +8,8 @@
         tbl
 
     let keywords = create_hashtable [
+        "abstract",      ABSTRACT;
         "and",           AND;
-        "class",         CLASS;
         "const",         CONST;
         "else",          ELSE;
         "elsif",         ELSIF;
@@ -30,6 +30,7 @@
         "type",          TYPE;
         "unit",          UNIT;
         "var",           VAR;
+        "virtual",       VIRTUAL;
         "while",         WHILE;
         "with",          WITH;
     ]

@@ -29,12 +29,12 @@ type symbol = {
        Type_param -> sym_type is what the type parameter is currently unified with. *)
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
-    mutable sym_tconstraints: (symbol * tbinds) list; (* type parameter constraints *)
+    mutable sym_virtual: bool;
+    mutable sym_abstract: bool;
     mutable sym_implementations: symbol list;
     mutable sym_param_mode: param_mode;
     mutable sym_code: istmt list option;
     mutable sym_imported: string option;
-    mutable sym_abstract: bool;
     mutable sym_const: iexpr option;
     mutable sym_selected: bool;
     mutable sym_translated: bool; (* Body has been translated?
@@ -45,15 +45,47 @@ type symbol = {
 and param_mode = Const_param | Var_param | Out_param
 
 and ttype =
-    | No_type
-    | Boolean_type
-    | Integer_type  (* This is temporary, for development *)
-    | Char_type
-    | Named_type of symbol * tbinds
-    | Pointer_type of ttype
-    | Record_type of symbol option
-    | Proc_type of symbol * tbinds
-    | Enum_type of symbol list
+    | TNone
+    | TBoolean
+    | TInteger
+    | TChar
+    | TName of symbol
+    | TVar of tvar
+    | TPointer of ttype
+    | TRecord of record_type
+    | TProc of proc_type
+    | TEnum of symbol list (* Const symbols that constitute the enumeration *)
+    | TUniv of tvar * ttype
+
+and tvar = {
+    tvar_origin: symbol; (* originally came from this symbol *)
+    tvar_id: int; (* unique id for dumping *)
+    mutable tvar_link: ttype option;
+}
+
+and record_type = {
+    rec_loc: loc;
+    rec_fields: record_field list;
+}
+
+and record_field = {
+    field_loc: loc;
+    field_name: string;
+    field_type: ttype;
+}
+
+and proc_type = {
+    proc_loc: loc;
+    proc_params: proc_param list;
+    proc_return: ttype;
+}
+
+and proc_param = {
+    param_loc: loc;
+    param_mode: param_mode;
+    param_name: string;
+    param_type: ttype;
+}
 
 and tbinds = (symbol * ttype) list
 
@@ -62,8 +94,7 @@ and classarg =
     | Forward of int
 
 and istmt =
-    | Call of loc * iexpr * (symbol * iexpr) list * tbinds
-            * classarg list ref
+    | Call of loc * iexpr * (proc_param * iexpr) list
     | Assign of loc * iexpr * iexpr
     | Return of loc * iexpr option
     | If_stmt of (loc * iexpr * istmt list) list * (loc * istmt list) option
@@ -76,16 +107,14 @@ and iexpr =
     | String_literal of loc * string
     | Char_literal of loc * string
     | Dispatch of int * symbol * tbinds
-    | Apply of loc * iexpr * (symbol * iexpr) list (* parameter bindings *)
-                           * tbinds (* type parameter bindings *)
-                           * classarg list ref (* classes *)
-    | Record_cons of loc * symbol (* record type *) * (symbol * iexpr) list
-    | Field_access of loc * iexpr * symbol
+    | Apply of loc * iexpr * (proc_param * iexpr) list (* parameter bindings *)
+    | Record_cons of loc * ttype (* record type *) * (string * iexpr) list
+    | Field_access of loc * iexpr * string
     | Binop of loc * iexpr * binop * iexpr
     | Deref of loc * iexpr
     | Not of loc * iexpr
     | New of loc * ttype * iexpr
-    | Genericify of iexpr * ttype
+    | Bind of ttype * iexpr
 
 let dummy_loc = {
     Lexing.pos_fname = "<built-in>";
@@ -93,6 +122,13 @@ let dummy_loc = {
     Lexing.pos_bol = 0;
     Lexing.pos_cnum = 0;
 }
+
+let tvar_counter = ref 0
+let new_tvar origin =
+    tvar_counter := !tvar_counter + 1;
+    { tvar_origin = origin;
+      tvar_id = !tvar_counter;
+      tvar_link = None }
 
 let is_kind kind sym = sym.sym_kind = kind
 
@@ -104,7 +140,7 @@ let new_root_sym () =
         sym_defined = Some dummy_loc;
         sym_type = None;
         sym_locals = [];
-        sym_tconstraints = [];
+        sym_virtual = false;
         sym_implementations = [];
         sym_param_mode = Const_param;
         sym_code = None;
@@ -135,7 +171,7 @@ let create_sym parent loc name kind =
         sym_defined = Some loc;
         sym_type = None;
         sym_locals = [];
-        sym_tconstraints = [];
+        sym_virtual = false;
         sym_implementations = [];
         sym_param_mode = Const_param;
         sym_code = None;
@@ -149,45 +185,40 @@ let create_sym parent loc name kind =
     parent.sym_locals <- parent.sym_locals @ [new_sym];
     new_sym
 
-let get_type_params sym =
-    List.filter (is_kind Type_param) sym.sym_locals
+let get_type_params sym = List.filter (is_kind Type_param) sym.sym_locals
+let get_params sym = List.filter (is_kind Param) sym.sym_locals
 
-let rec get_fields sym =
-    match sym with
-        | {sym_kind=Type_sym; sym_type=Some(Record_type(base)); sym_locals=locals} ->
-            (List.filter (function {sym_kind=Var} -> true | _ -> false) locals) @ (match base with Some t -> get_fields t | None -> [])
-        | _ -> raise (Failure "get_fields")
+let string_of_tvar v = "t" ^ string_of_int v.tvar_id
 
-let get_params sym =
-    List.filter (is_kind Param) sym.sym_locals
-
-let rec string_of_type_int substs = function
-    | No_type -> "<no type>"
-    | Boolean_type -> "bool"
-    | Integer_type -> "int"
-    | Char_type -> "char"
-    | Named_type({sym_kind=Type_param} as tp, []) ->
-        begin match maybe_assq tp substs with
-            | None -> tp.sym_name
-            | Some t -> string_of_type_int substs t
-        end
-    | Named_type(sym, []) -> sym.sym_name
-    | Named_type(sym, args) ->
-        sym.sym_name ^ "<" ^ String.concat ", "
-            (List.map (fun (param, arg) ->
-                param.sym_name ^ "=" ^ string_of_type_int substs arg) args) ^ ">"
-    | Pointer_type t -> "^" ^ string_of_type_int substs t
-    | Proc_type _ -> "<proc type>"
-    | Enum_type elements ->
+let rec string_of_type = function
+    | TBoolean -> "bool"
+    | TInteger -> "int"
+    | TChar -> "char"
+    | TName s -> s.sym_name
+    | TVar v -> string_of_tvar v
+    | TPointer ty -> "^" ^ string_of_type ty
+    | TRecord record ->
+        "{" ^ String.concat ", " (List.map (fun field ->
+            field.field_name ^ ": " ^ string_of_type field.field_type) record.rec_fields) ^ "}"
+    | TProc proc ->
+        "proc (" ^ String.concat ", " (List.map (fun param ->
+            (match param.param_mode with
+                | Const_param -> ""
+                | Var_param -> "var "
+                | Out_param -> "out "
+                ) ^ param.param_name ^ ": "
+                  ^ string_of_type param.param_type
+            ) proc.proc_params) ^ ")"
+            ^ (match proc.proc_return with
+                | TNone -> ""
+                | ty -> ": " ^ string_of_type ty)
+    | TEnum elements ->
         "(" ^ String.concat ", " (List.map (fun s -> s.sym_name) elements) ^ ")"
-
-let string_of_type t = string_of_type_int [] t
-
-let string_of_type_2 substs t =
-    let short = string_of_type_int [] t in
-    let long = string_of_type_int substs t in
-    if short = long then short
-    else short ^ " (" ^ long ^ ")"
+    | TUniv(v, ty) ->
+        "{" ^ string_of_tvar v ^ " from "
+            ^ (match v.tvar_origin with
+                | {sym_kind=Type_sym} -> v.tvar_origin.sym_name
+                | {sym_kind=Var} -> v.tvar_origin.sym_name ^ "'Type") ^ "}"
 
 let rec sym_is_grandchild parent sym =
     if parent == sym then true
@@ -200,10 +231,3 @@ let full_name sym =
             if s.sym_parent == s then r
             else follow (s.sym_name::r) s.sym_parent
          in follow [] sym)
-
-let rec iter_type_params_in f = function
-    | No_type | Boolean_type | Integer_type | Char_type -> ()
-    | Named_type({sym_kind=Type_param} as tp, []) -> f tp
-    | Named_type(_, args) -> List.iter (fun (_, t) -> iter_type_params_in f t) args
-    | Pointer_type t -> iter_type_params_in f t
-    | Record_type _ | Proc_type _ -> ()

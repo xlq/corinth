@@ -123,21 +123,21 @@ let new_temp s =
     !(s.s_temp_counter)
 
 let rec is_scalar = function
-    | Boolean_type -> true
-    | Char_type -> true
-    | Integer_type -> true
-    | Record_type _ -> false
-    | Named_type({sym_kind=Type_sym; sym_type=Some t}, _) -> is_scalar t
-    | Named_type({sym_kind=Type_param}, []) -> false
-    | Pointer_type _ -> true
-    | Proc_type _ -> true
+    | TBoolean -> true
+    | TChar -> true
+    | TInteger -> true
+    | TRecord _ -> false
+    | TName {sym_kind=Type_sym; sym_type=Some t} -> is_scalar t
+    | TVar {tvar_link=None} -> false
+    | TPointer _ -> true
+    | TProc _ -> true
 
 let rec func_prototype s proc_sym =
     "function (" ^ String.concat ", "
-        (List.map
+        ((*List.map
          (fun (i, _) -> lua_name_of_class_param i)
          (enumerate proc_sym.sym_tconstraints)
-         @ List.map lua_name_of_local (get_params proc_sym))
+         @*) List.map lua_name_of_local (get_params proc_sym))
         ^ ")"
 
 let rec return_list s proc_sym =
@@ -148,11 +148,12 @@ let rec return_list s proc_sym =
                      ) (get_params proc_sym))
 
 and trans_call s (returns: bool) iexpr =
-    match iexpr with Apply(loc, proc_e, args, tbinds, classes) ->
-    let replacements = ref [] in
-    let translated = trans_iexpr s false proc_e ^ "("
+    match iexpr with Apply(loc, proc_e, args) ->
+    let replacements = ref [] in (* variables to replace upon return from function *)
+    (* XXX: This mechanism is broken! (Aliasing!) *)
+    let translated = trans_iexpr s true proc_e ^ "("
         ^ String.concat ", "
-            (List.map (function
+            ((*List.map (function
                 | Implement(cls, procs) ->
                     "{" ^ String.concat ", "
                         (List.map (fun (cls_proc, impl) ->
@@ -160,8 +161,8 @@ and trans_call s (returns: bool) iexpr =
                             ) procs) ^ "}"
                 | Forward i -> lua_name_of_class_param i
               ) !classes
-               @ List.map (fun (param, arg) ->
-                match param.sym_param_mode with
+               @*) List.map (fun (param, arg) ->
+                match param.param_mode with
                     | Const_param -> trans_iexpr s true arg
                     | Var_param | Out_param ->
                         let arg' = trans_iexpr s true arg in
@@ -200,7 +201,7 @@ and trans_iexpr s mut iexpr =
             lua_name_of_var sym
         | Name(loc, {sym_kind=Const; sym_const=Some e}) ->
             trans_iexpr s mut e
-        | Name(loc, {sym_kind=Const; sym_type=Some(Enum_type _); sym_name=name}) ->
+        | Name(loc, {sym_kind=Const; sym_type=Some(TEnum _); sym_name=name}) ->
             (* Enumeration elements are translated as strings. Easier to debug! *)
             "\"" ^ name ^ "\""
         | Name(loc, sym) ->
@@ -234,21 +235,20 @@ and trans_iexpr s mut iexpr =
                 ^ " (" ^ trans_iexpr s false rhs ^ ")"
         | Record_cons(loc, rec_sym, fields) ->
             "{" ^ String.concat ", " (List.map (fun (field, value) ->
-                lua_name_of_local field ^ " = " ^ trans_iexpr s false value
+                field ^ " = " ^ trans_iexpr s false value
                 ) fields) ^ "}"
         | Field_access(loc, lhs, field) ->
-            "(" ^ (trans_iexpr s mut lhs) ^ ")." ^ lua_name_of_local field
+            "(" ^ (trans_iexpr s mut lhs) ^ ")." ^ field
         | Not(loc, e) ->
             "not (" ^ trans_iexpr s false e ^ ")"
         | New(loc, ty, e) ->
             "{rv(" ^ trans_iexpr s false e ^ ")}"
         | Deref(loc, ptr) ->
             trans_iexpr s false ptr ^ "[1]"
-        | Genericify(e, _) -> trans_iexpr s mut e
 
 and trans_istmt s = function
-    | Call(loc, proc_e, args, tbinds, classes) ->
-        ignore (trans_call s false (Apply(loc, proc_e, args, tbinds, classes)))
+    | Call(loc, proc_e, args) ->
+        ignore (trans_call s false (Apply(loc, proc_e, args)))
     | Assign(loc, dest, src) ->
         emit s (trans_iexpr s true dest ^ " = " ^ trans_iexpr s false src ^ ";")
     | Return(loc, None) ->
