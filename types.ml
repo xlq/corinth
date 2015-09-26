@@ -50,7 +50,7 @@ let rec subst v t' t =
     match t with
         | TNone | TBoolean | TInteger | TChar | TName _ -> t
         | TVar v' when v == v' -> t'
-        | TPointer t -> subst v t' t
+        | TPointer t -> TPointer(subst v t' t)
         | TRecord record ->
             TRecord { record with
                       rec_fields = List.map
@@ -78,7 +78,7 @@ let rec coerce_params ctx sits param1 param2 =
         | Out_param, Out_param -> ()
     end;
     param2.param_mode <- param1.param_mode; (* XXX: Dodgy! *)
-    coerce ctx (SParameter(param2)::sits) param1.param_type param2.param_type
+    coerce ctx (SParameter(param1)::sits) param2.param_type param1.param_type
 
 and coerce ctx sits t1 t2 =
     match t1, t2 with
@@ -131,6 +131,6 @@ and coerce ctx sits t1 t2 =
             if !params1 <> [] then raise (Type_mismatch (sits, EParam_missing_right(List.hd !params1)));
             coerce ctx (SReturn_type::sits) proc1.proc_return proc2.proc_return
         | TUniv(v, t1), t2 ->
-            let v' = new_tvar v.tvar_origin in
+            let v' = new_tvar v.tvar_loc v.tvar_name in
             coerce ctx sits (subst v (TVar v') t1) t2
         | _ -> raise (Type_mismatch(sits, ESimply_wrong(t1, t2)))

@@ -6,9 +6,9 @@ if exists("b:current_syntax")
     finish
 endif
 
-syn keyword synKeyword class else elsif end if implements imported is loop 
-syn keyword synKeyword overriding proc return then type unit while with
-syn keyword synMinorKeyword and const new not or out var 
+syn keyword synKeyword abstract class else elsif end if implements imported is loop 
+syn keyword synKeyword overriding proc return then type unit virtual while with
+syn keyword synMinorKeyword and const new not or out var
 syn keyword synConstant true false
 syn match synIdent '[A-Za-z_][A-Za-z0-9_]*'
 syn match synBracket '[()<>{}|]'

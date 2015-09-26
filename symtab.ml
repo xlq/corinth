@@ -16,7 +16,6 @@ type sym_kind =
     | Type_param
     | Param
     | Const
-    | Proc_type_sym
 
 type symbol = {
     sym_parent: symbol; (* Parent symbol (this symbol is in sym_parent.sym_locals). *)
@@ -24,9 +23,8 @@ type symbol = {
     sym_name: string;
     mutable sym_defined: loc option; (* Can be None for parent units that aren't loaded/defined. *)
     (* Var | Param -> sym_type is the type of the variable/parameter.
-       Proc -> sym_type is the return type of the procedure.
-       Type_sym -> sym_type is the definition of the type.
-       Type_param -> sym_type is what the type parameter is currently unified with. *)
+       Proc -> sym_type is a TProc type possibly within TUniv
+       Type_sym -> sym_type is the definition of the type. *)
     mutable sym_type: ttype option;
     mutable sym_locals: symbol list; (* Sub-symbols. Order is important for parameters. *)
     mutable sym_virtual: bool;
@@ -58,7 +56,8 @@ and ttype =
     | TUniv of tvar * ttype
 
 and tvar = {
-    tvar_origin: symbol option; (* originally came from this symbol *)
+    tvar_loc: loc;
+    tvar_name: string option;
     tvar_id: int; (* unique id for dumping *)
     mutable tvar_link: ttype option;
 }
@@ -124,9 +123,10 @@ let dummy_loc = {
 }
 
 let tvar_counter = ref 0
-let new_tvar origin =
+let new_tvar loc name =
     tvar_counter := !tvar_counter + 1;
-    { tvar_origin = origin;
+    { tvar_loc = loc;
+      tvar_name = name;
       tvar_id = !tvar_counter;
       tvar_link = None }
 

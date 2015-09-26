@@ -27,10 +27,11 @@ type translation_state = {
     ts_todo: (todo * (unit -> unit)) list ref;
     ts_block: istmt list ref option;
     ts_tctx: Types.context;
+    ts_type_params: tvar list;
 }
 
 let coerce ts situation t1 t2 =
-    prerr_endline ("coerce " ^ string_of_type t1 ^ " to " ^ string_of_type t2);
+    (*prerr_endline ("coerce " ^ string_of_type t1 ^ " to " ^ string_of_type t2);*)
     Types.coerce ts.ts_tctx situation t1 t2 (* short-hand *)
 
 let actual_type = function
@@ -43,6 +44,7 @@ let new_translation_state root = {
     ts_todo = ref [];
     ts_block = None;
     ts_tctx = Types.new_context ();
+    ts_type_params = [];
 }
 
 let todo ts todo_kind f =
@@ -207,19 +209,6 @@ let rec loc_of_iexpr = function
     | New(loc, _, _)
         -> loc
 
-let construct_type_of_proc proc_sym =
-    List.fold_right (fun {sym_kind=Type_param; sym_type=Some (TVar v)} proc_type ->
-        TUniv(v, proc_type)
-    ) (get_type_params proc_sym) (TProc {
-        proc_loc = unsome proc_sym.sym_defined;
-        proc_params = List.map (fun param ->
-            { param_loc = unsome param.sym_defined;
-              param_name = Some param.sym_name;
-              param_mode = param.sym_param_mode;
-              param_type = unsome param.sym_type }
-            ) (get_params proc_sym);
-        proc_return = unsome proc_sym.sym_type })
-
 let rec trans_unit ts = function
     | Parse_tree.Unit(loc, [name], decls) ->
         check_for_duplicate_definition ts.ts_scope loc name;
@@ -240,20 +229,37 @@ let rec trans_unit ts = function
 
 and trans_decls ts = List.iter (trans_decl ts)
 
-and trans_params ts proc_sym params return_type =
-    let ts = {ts with ts_scope = proc_sym} in
-    List.iter (fun (loc, name, ttype, mode) ->
-        let ttype' = match ttype with
-            | None -> None
-            | Some t -> Some (trans_type ts t) in
-        check_for_duplicate_definition proc_sym loc name;
-        let param_sym = create_sym proc_sym loc name Param in
-        param_sym.sym_type <- ttype';
-        param_sym.sym_param_mode <- mode
-    ) params;
-    proc_sym.sym_type <- Some (match return_type with
-        | None -> TNone
-        | Some ty -> trans_type ts ty)
+(* Translate a proc type. This is also used to produce a proc type from a proc
+   declaration. Returns (ty, proc) where ty is the whole type and proc is the proc_type
+   record for convenience. *)
+and trans_proc_type ts loc type_params params return_type =
+    let type_params = trans_type_params ts type_params in
+    let ts = { ts with ts_type_params = type_params @ ts.ts_type_params } in
+    let rec trans_params declared = function
+        | [] -> declared
+        | (loc, name, ttype, mode)::tail ->
+            List.iter (fun param ->
+                if name = unsome param.param_name then begin
+                    Errors.semantic_error loc
+                        ("Parameter `" ^ name ^ "' declared twice.")
+                end
+            ) declared;
+            check_for_duplicate_definition ts.ts_scope loc name;
+            trans_params ({
+                param_loc = loc;
+                param_mode = mode;
+                param_name = Some name;
+                param_type = match ttype with
+                    | Some t -> trans_type ts t
+                    | None -> TVar (new_tvar loc None)
+            }::declared) tail
+    in
+    let proc = { proc_loc = loc;
+                  proc_params = trans_params [] params;
+                  proc_return = match return_type with
+                    | None -> TNone (* XXX: Does no return type mean type variable? *)
+                    | Some ty -> trans_type ts ty } in
+    (List.fold_right (fun tvar ty -> TUniv(tvar, ty)) type_params (TProc proc)), proc
 
 and trans_decl ts = function
     (*
@@ -270,9 +276,14 @@ and trans_decl ts = function
     | Parse_tree.Proc_decl(loc, is_virtual, name, type_params, params, return_type, maybe_implements, body) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
+        let proc_type, proc = trans_proc_type ts loc type_params params return_type in
+        (* Create symbols for the parameters. *)
+        List.iter (fun param ->
+            (create_sym proc_sym param.param_loc (unsome param.param_name) Param).sym_type
+                <- Some param.param_type
+        ) proc.proc_params;
+        proc_sym.sym_type <- Some proc_type;
         proc_sym.sym_virtual <- is_virtual;
-        ignore (trans_type_params {ts with ts_scope = proc_sym} type_params);
-        trans_params ts proc_sym params return_type;
         todo ts Todo_proc (fun () ->
             (*begin match maybe_implements with
                 | None -> ()
@@ -288,7 +299,8 @@ and trans_decl ts = function
             end;*) (* TODO TODO TODO *)
 
             match body with
-                | Parse_tree.Abstract -> ()
+                | Parse_tree.Abstract ->
+                    proc_sym.sym_abstract <- true
                 | Parse_tree.Body code ->
                     let stmts = ref [] in
                     trans_stmts {ts with ts_scope = proc_sym;
@@ -301,8 +313,8 @@ and trans_decl ts = function
         (* TODO: There is much in common with Proc_decl: merge! *)
         check_for_duplicate_definition ts.ts_scope loc name;
         let proc_sym = create_sym ts.ts_scope loc name Proc in
-        ignore (trans_type_params {ts with ts_scope = proc_sym} type_params);
-        trans_params ts proc_sym params return_type;
+        let proc_type, proc = trans_proc_type ts loc type_params params return_type in
+        proc_sym.sym_type <- Some proc_type;
         proc_sym.sym_imported <- Some c_name;
         todo ts Todo_proc (fun () ->
             (*begin match maybe_implements with
@@ -328,7 +340,7 @@ and trans_decl ts = function
     | Parse_tree.Type_decl(loc, name, type_params, Parse_tree.Record_type(fields)) ->
         check_for_duplicate_definition ts.ts_scope loc name;
         let type_sym = create_sym ts.ts_scope loc name Type_sym in
-        let type_params = trans_type_params {ts with ts_scope = type_sym} type_params in
+        let type_params = trans_type_params ts type_params in
         (* TODO: base record *)
         todo ts Todo_type (fun () ->
             let ts = {ts with ts_scope = type_sym} in
@@ -344,9 +356,10 @@ and trans_decl ts = function
                           field_type = ty } :: fields
             ) [] fields) in
             type_sym.sym_type <- Some
-                (List.fold_right (fun {sym_kind=Type_param; sym_type=Some (TVar v)} rec_type ->
-                    TUniv(v, rec_type)) type_params (TRecord { rec_loc = loc;
-                                                               rec_fields = fields }))
+                (List.fold_right (fun v rec_type -> TUniv(v, rec_type))
+                    type_params
+                    (TRecord { rec_loc = loc;
+                               rec_fields = fields }))
         )
     | Parse_tree.Var_decl(loc, name, maybe_type, maybe_init) ->
         check_for_duplicate_definition ts.ts_scope loc name;
@@ -385,29 +398,39 @@ and trans_decl ts = function
         const_sym.sym_type <- Some expr_type;
         const_sym.sym_const <- Some expr
 
+(* Translate type parameters into a tvar list, checking for duplicates. *)
 and trans_type_params ts =
-    List.map (fun (loc, name) ->
-        check_for_duplicate_definition ts.ts_scope loc name;
-        let tp = create_sym ts.ts_scope loc name Type_param in
-        let v = new_tvar (Some tp) in
-        tp.sym_type <- Some (TVar v);
-        tp
-    )
+    let rec loop declared = function
+        | [] -> declared
+        | (loc, name)::tail ->
+            List.iter (fun tvar ->
+                if name = unsome tvar.tvar_name then begin
+                    Errors.semantic_error loc
+                        ("Type parameter `" ^ name ^ "' declared twice.")
+                end
+            ) declared;
+            check_for_duplicate_definition ts.ts_scope loc name;
+            loop ((new_tvar loc (Some name))::declared) tail
+    in loop []
 
 and trans_type ts = function
     | Parse_tree.Integer_type -> TInteger
     | Parse_tree.Boolean_type -> TBoolean
     | Parse_tree.Char_type -> TChar
     | Parse_tree.Named_type(loc, [name]) ->
-        begin match search_scopes_or_fail ts loc name with
-            | {sym_kind=Type_sym} as typ, [] ->
-                TName typ
-            | {sym_kind=Type_param} as typ_p, [] ->
-                begin match typ_p.sym_type with
-                    | Some (TVar v) -> TVar v
-                    | _ -> assert false
-                end
-            | bad_sym, _ -> wrong_sym_kind ts loc bad_sym "type"
+        begin match maybe_find (function {tvar_name=Some s} when s = name -> true 
+                                       | _ -> false) ts.ts_type_params
+        with
+            | Some tvar -> TVar tvar
+            | None -> match search_scopes_or_fail ts loc name with
+                | {sym_kind=Type_sym} as typ, [] ->
+                    TName typ
+                | {sym_kind=Type_param} as typ_p, [] ->
+                    begin match typ_p.sym_type with
+                        | Some (TVar v) -> TVar v
+                        | _ -> assert false
+                    end
+                | bad_sym, _ -> wrong_sym_kind ts loc bad_sym "type"
         end
     (*
     | Parse_tree.Applied_type(loc, ttype, (pos_args, named_args)) ->
@@ -439,13 +462,9 @@ and trans_type ts = function
     *)
     | Parse_tree.Pointer_type(ttype) ->
         TPointer(trans_type ts ttype)
-    (*
-    | Parse_tree.Proc_type(loc, constr_type_params, params, return_type) ->
-        let ptypesym = create_sym ts.ts_scope loc "" Proc_type_sym in
-        trans_type_params {ts with ts_scope = ptypesym} constr_type_params;
-        trans_params ts ptypesym params return_type;
-        Proc_type(ptypesym, [])
-    *)
+    | Parse_tree.Proc_type(loc, type_params, params, return_type) ->
+        let proc_type, _ = trans_proc_type ts loc type_params params return_type in
+        proc_type
     | Parse_tree.Enum_type(elements) ->
         let elements = List.map (fun (loc, name) ->
             check_for_duplicate_definition ts.ts_scope loc name;
@@ -552,10 +571,9 @@ and trans_expr ts (target_type: ttype option) = function
                 | {sym_kind=Param; sym_param_mode=Var_param|Out_param} ->
                     Right(Name(loc, sym), unsome sym.sym_type, true, unsome sym.sym_defined)
                 | {sym_kind=Const}
-                | {sym_kind=Param; sym_param_mode=Const_param} ->
-                    Right(Name(loc, sym), unsome sym.sym_type, false, unsome sym.sym_defined)
+                | {sym_kind=Param; sym_param_mode=Const_param}
                 | {sym_kind=Proc} ->
-                    Right(Name(loc, sym), construct_type_of_proc sym, false, unsome sym.sym_defined)
+                    Right(Name(loc, sym), unsome sym.sym_type, false, unsome sym.sym_defined)
         in
 
         (* Search for first part of name. *)
@@ -674,7 +692,7 @@ and trans_expr ts (target_type: ttype option) = function
                       param_type = ty }) (pos_args' @ named_args');
             proc_return = match target_type with
                 | Some ty -> ty
-                | None -> TVar (new_tvar None) } in
+                | None -> TVar (new_tvar loc None) } in
         (*coerce ts proc_type (TProc args_proc_type);*)
         expect_type ts loc (TProc args_proc_type)
             [SApply(match proc with | Name(_,s) -> Some s | _ -> None)] proc_type;

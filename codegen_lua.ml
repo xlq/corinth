@@ -287,7 +287,7 @@ and trans s complete sym =
                     | {sym_kind=Type_sym} -> ()
                     | {sym_kind=Var} ->
                         if not complete then emit s ("local " ^ lua_name_of_var sym)
-                    | {sym_kind=Proc; sym_imported=None} ->
+                    | {sym_kind=Proc; sym_imported=None; sym_abstract=false} ->
                         if not complete then begin
                             emit s ("local " ^ lua_name_of_sym sym)
                         end else begin
@@ -306,6 +306,7 @@ and trans s complete sym =
                             );
                             emit s "end"
                         end
+                    | {sym_kind=Proc; sym_abstract=true} -> ()
                     | {sym_kind=Proc; sym_imported=Some _} -> ()
                     | {sym_kind=Class} -> ()
             )

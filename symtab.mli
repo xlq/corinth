@@ -15,7 +15,6 @@ type sym_kind =
     | Type_param
     | Param
     | Const
-    | Proc_type_sym (* Proc_type ttype points to this symbol kind for its parameters/return type etc. *)
 
 type symbol = {
     sym_parent: symbol; (* Parent symbol (this symbol is in sym_parent.sym_locals). *)
@@ -60,7 +59,8 @@ and ttype =
     | TUniv of tvar * ttype
 
 and tvar = {
-    tvar_origin: symbol option; (* originally came from this symbol *)
+    tvar_loc: loc;
+    tvar_name: string option; (* original name (not unique - tvar_id provides uniqueness *)
     tvar_id: int; (* unique id for dumping *)
     mutable tvar_link: ttype option; (* type substitution *)
 }
@@ -118,7 +118,7 @@ and iexpr =
     | New of loc * ttype * iexpr
     | Bind of ttype * iexpr (* bind type parameter *)
 
-val new_tvar : symbol option -> tvar
+val new_tvar : loc -> string option -> tvar
 val is_kind : sym_kind -> symbol -> bool
 val new_root_sym : unit -> symbol
 val describe_sym : symbol -> string (* for error messages *)
